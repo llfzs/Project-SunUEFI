@@ -239,8 +239,12 @@ jobs:
           mkdir -p artifacts/release-assets
 
           # 直接从源文件压缩，不额外 cp，避免 runner 磁盘被顶爆
+          [ -r "$src" ] || sudo chmod a+r "$src"
           zstd -T0 -3 -q -f "$src" -o "artifacts/release-assets/${base}.zst"
-          rm -f "$src"
+          # 压缩后立刻删源文件，给分卷腾空间。
+          # 注意: artifacts/fastboot-sparse 是容器内 root 创建的，宿主机 runner
+          # 没有写权限，直接 rm 会 Permission denied，必须走 sudo。
+          rm -f "$src" 2>/dev/null || sudo rm -f "$src"
 
           # 1900MB < 2 GiB(2147MB)，留余量防踩线
           split -b 1900M -d -a 2 "artifacts/release-assets/${base}.zst" \
@@ -269,9 +273,22 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          assets=(artifacts/release-assets/*)
+          assets=()
+          for f in artifacts/release-assets/*; do
+            case "$f" in
+              *.part[0-9][0-9]|*.tar.zst|*/SHA256SUMS-*) ;;
+              *) echo "跳过中间文件: $f"; continue ;;
+            esac
+            # Release 单文件硬限制 2 GiB，超了直接不传，避免整个 step 失败
+            size=$(stat -c%s "$f")
+            if [ "$size" -ge 2147483648 ]; then
+              echo "跳过超限文件: $f ($((size/1024/1024)) MB >= 2 GiB)"
+              continue
+            fi
+            assets+=("$f")
+          done
           if [ ${#assets[@]} -eq 0 ]; then
-            echo "本 target 无 Release 产物，跳过"
+            echo "本 target 无可用 Release 产物，跳过"
             exit 0
           fi
           printf '待上传: %s\n' "${assets[@]##*/}"
