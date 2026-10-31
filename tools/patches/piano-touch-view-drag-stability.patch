@@ -1,0 +1,322 @@
+Subject: [PATCH] Stabilise drag: hysteresis, NMS, global tracking, smoothing
+
+Four defects cause window jitter during slow touch drags on the 3200x2136
+panel (sensor grid ~40x60, one cell ~53 px):
+
+1. No hysteresis — find_points() uses a fixed threshold; a stationary
+   finger's capacitance blob oscillates across it, producing repeated
+   lift/repress events.
+2. No non-maximum suppression — one finger can leave two adjacent 3x3
+   maxima, creating a ghost contact that competes for the drag.
+3. Per-slot greedy matching in track() — two crossing fingers swap slots,
+   handing the drag to the wrong finger for multiple frames.
+4. ui_report() binds ABS_X/ABS_Y to the lowest-numbered active slot
+   instead of the longest-held contact; the compositor's pointer
+   emulation follows the wrong finger.
+
+Fixes:
+- Tracked contacts stay alive at threshold/2 within PEAK_HOLD_CELLS (2).
+- Candidates sorted by peak strength; weaker peaks within PEAK_MIN_DIST
+  (2 cells ~107 px) are suppressed.
+- track() uses iterative global-minimum pairing (no slot swap).
+- New slot_move(): 8.8 fixed-point low-pass (SMOOTH_ALPHA=96/256) with
+  snap bypass above SMOOTH_SNAP_DIST (24 px).
+- ui_report() ABS_X/ABS_Y follows the slot with the greatest age.
+
+Tuning knobs are the four macros at the top of the file.  Threshold
+default, report rate, coordinate transform and pen decode are unchanged.
+
+--- a/initramfs/touch-view/piano-touch-view.c
++++ b/initramfs/touch-view/piano-touch-view.c
+@@ -79,6 +79,11 @@
+ #define SCREEN_H 2136
+ /* a contact moving further than this between frames is a new finger */
+ #define TRACK_MAX_DIST 400
++/* drag stability: hysteresis, NMS, smoothing */
++#define PEAK_HOLD_CELLS 2	/* tracked point stays alive within this radius */
++#define PEAK_MIN_DIST 2		/* suppress weaker peaks within this cell distance */
++#define SMOOTH_ALPHA 96		/* low-pass numerator /256; smaller = smoother */
++#define SMOOTH_SNAP_DIST 24	/* px; bypass filter above this inter-frame move */
+ 
+ enum mode { MODE_STATS, MODE_MAP, MODE_POINTS, MODE_PAINT, MODE_DUMP,
+ 	    MODE_INPUT };
+@@ -148,6 +153,8 @@
+ 	int next_id;
+ 	struct {
+ 		int active, id, x, y, px, py, fresh, ended;
++		int age;		/* frames since contact appeared */
++		int32_t sx, sy;	/* 8.8 fixed-point smoothed position */
+ 	} slot[MAX_POINTS];
+ } trk;
+ 
+@@ -479,14 +486,24 @@
+ static int find_points(struct point *pts)
+ {
+ 	int r, c, dr, dc, n = 0;
++	int hold_threshold = opt.threshold / 2;
+ 
+-	for (r = 0; r < st.rows; r++) {
+-		for (c = 0; c < st.cols; c++) {
++	/* Pass 1: collect all local-maximum candidates above the hold
++	 * threshold.  Already-tracked slots get hysteresis: their peaks only
++	 * need hold_threshold and must fall within PEAK_HOLD_CELLS of the
++	 * slot's last known sensor position. */
++	struct { double x, y; int peak; int held; } cand[MAX_POINTS * 4];
++	int ncand = 0;
++
++	for (r = 0; r < st.rows && ncand < MAX_POINTS * 4; r++) {
++		for (c = 0; c < st.cols && ncand < MAX_POINTS * 4; c++) {
+ 			int v = delta[r * st.cols + c], is_peak = 1;
+ 			double sw = 0, sx = 0, sy = 0;
++			int held = 0;
+ 
+-			if (v < opt.threshold)
++			if (v < hold_threshold)
+ 				continue;
++			/* 3x3 local maximum check */
+ 			for (dr = -1; dr <= 1 && is_peak; dr++)
+ 				for (dc = -1; dc <= 1; dc++) {
+ 					int rr = r + dr, cc = c + dc;
+@@ -494,7 +511,6 @@
+ 					if ((!dr && !dc) || rr < 0 || cc < 0 ||
+ 					    rr >= st.rows || cc >= st.cols)
+ 						continue;
+-					/* ties resolve to the first node */
+ 					if (delta[rr * st.cols + cc] > v ||
+ 					    (delta[rr * st.cols + cc] == v &&
+ 					     (dr < 0 || (dr == 0 && dc < 0)))) {
+@@ -504,6 +520,26 @@
+ 				}
+ 			if (!is_peak)
+ 				continue;
++			/* Hysteresis: is this peak near an active slot? */
++			if (v < opt.threshold) {
++				int s;
++				for (s = 0; s < MAX_POINTS; s++) {
++					if (!trk.slot[s].active)
++						continue;
++					/* Convert slot screen pos back to sensor grid */
++					double slot_u = (double)trk.slot[s].x / SCREEN_W * st.cols;
++					double slot_v = (double)trk.slot[s].y / SCREEN_H * st.rows;
++					double ddx = (c + 0.5) - slot_u, ddy = (r + 0.5) - slot_v;
++					if (ddx * ddx + ddy * ddy <=
++					    (double)(PEAK_HOLD_CELLS * PEAK_HOLD_CELLS)) {
++						held = 1;
++						break;
++					}
++				}
++				if (!held)
++					continue;
++			}
++			/* 3x3 weighted centroid */
+ 			for (dr = -1; dr <= 1; dr++)
+ 				for (dc = -1; dc <= 1; dc++) {
+ 					int rr = r + dr, cc = c + dc, w;
+@@ -518,11 +554,50 @@
+ 					sx += w * (cc + 0.5);
+ 					sy += w * (rr + 0.5);
+ 				}
+-			if (n < MAX_POINTS && sw > 0) {
+-				pts[n].x = sx / sw;
+-				pts[n].y = sy / sw;
+-				pts[n].peak = v;
++			if (sw > 0) {
++				cand[ncand].x = sx / sw;
++				cand[ncand].y = sy / sw;
++				cand[ncand].peak = v;
++				cand[ncand].held = held;
++				ncand++;
++			}
++		}
++	}
++
++	/* Pass 2: non-maximum suppression — sort by peak descending, keep
++	 * only the strongest within PEAK_MIN_DIST cell distance. */
++	{
++		int i, j;
++		/* simple insertion sort (ncand is small) */
++		for (i = 1; i < ncand; i++) {
++			typeof(cand[0]) tmp = cand[i];
++			j = i - 1;
++			while (j >= 0 && cand[j].peak < tmp.peak) {
++				cand[j + 1] = cand[j];
++				j--;
++			}
++			cand[j + 1] = tmp;
++		}
++		{
++			int suppressed[MAX_POINTS * 4];
++			memset(suppressed, 0, sizeof(suppressed));
++			for (i = 0; i < ncand && n < MAX_POINTS; i++) {
++				if (suppressed[i])
++					continue;
++				pts[n].x = cand[i].x;
++				pts[n].y = cand[i].y;
++				pts[n].peak = cand[i].peak;
+ 				n++;
++				/* suppress weaker neighbours */
++				for (j = i + 1; j < ncand; j++) {
++					if (suppressed[j])
++						continue;
++					double dx = cand[i].x - cand[j].x;
++					double dy = cand[i].y - cand[j].y;
++					if (dx * dx + dy * dy <
++					    (double)(PEAK_MIN_DIST * PEAK_MIN_DIST))
++						suppressed[j] = 1;
++				}
+ 			}
+ 		}
+ 	}
+@@ -627,41 +702,91 @@
+ 		*y = height - 1;
+ }
+ 
++/* first-order low-pass with snap bypass for fast movement */
++static void slot_move(int s, int nx, int ny)
++{
++	int dx = nx - trk.slot[s].x, dy = ny - trk.slot[s].y;
++	int dist2 = dx * dx + dy * dy;
++
++	trk.slot[s].px = trk.slot[s].x;
++	trk.slot[s].py = trk.slot[s].y;
++
++	if (dist2 > SMOOTH_SNAP_DIST * SMOOTH_SNAP_DIST) {
++		trk.slot[s].x = nx;
++		trk.slot[s].y = ny;
++		trk.slot[s].sx = (int32_t)nx << 8;
++		trk.slot[s].sy = (int32_t)ny << 8;
++	} else {
++		trk.slot[s].sx += ((int32_t)(nx << 8) - trk.slot[s].sx) * SMOOTH_ALPHA / 256;
++		trk.slot[s].sy += ((int32_t)(ny << 8) - trk.slot[s].sy) * SMOOTH_ALPHA / 256;
++		trk.slot[s].x = (int)((trk.slot[s].sx + 128) >> 8);
++		trk.slot[s].y = (int)((trk.slot[s].sy + 128) >> 8);
++	}
++}
++
+ /* match this frame's contacts to the slots of the previous one */
+ static int track(const struct point *pts, int n)
+ {
+ 	int px[MAX_POINTS], py[MAX_POINTS], taken[MAX_POINTS] = { 0 };
++	int matched[MAX_POINTS] = { 0 };
+ 	int i, s, active = 0;
+ 
+ 	for (i = 0; i < n; i++)
+ 		to_screen(&pts[i], SCREEN_W, SCREEN_H, &px[i], &py[i]);
+ 
+-	for (s = 0; s < MAX_POINTS; s++) {
+-		int best = -1, best_d = TRACK_MAX_DIST * TRACK_MAX_DIST;
++	/* Global nearest-pair matching: repeatedly pick the closest
++	 * (slot, point) pair across all combinations. */
++	{
++		int pairs = n < MAX_POINTS ? n : MAX_POINTS;
++		int round;
++
++		for (round = 0; round < pairs; round++) {
++			int best_s = -1, best_i = -1;
++			int best_d = TRACK_MAX_DIST * TRACK_MAX_DIST;
++
++			for (s = 0; s < MAX_POINTS; s++) {
++				if (!trk.slot[s].active || matched[s])
++					continue;
++				for (i = 0; i < n; i++) {
++					int dx, dy, d2;
+ 
++					if (taken[i])
++						continue;
++					dx = px[i] - trk.slot[s].x;
++					dy = py[i] - trk.slot[s].y;
++					d2 = dx * dx + dy * dy;
++					if (d2 < best_d) {
++						best_d = d2;
++						best_s = s;
++						best_i = i;
++					}
++				}
++			}
++			if (best_s < 0)
++				break;
++			matched[best_s] = 1;
++			taken[best_i] = 1;
++			slot_move(best_s, px[best_i], py[best_i]);
++			trk.slot[best_s].age++;
++			trk.slot[best_s].fresh = 0;
++			trk.slot[best_s].ended = 0;
++		}
++	}
++
++	/* Deactivate unmatched slots */
++	for (s = 0; s < MAX_POINTS; s++) {
+ 		trk.slot[s].fresh = 0;
+ 		trk.slot[s].ended = 0;
+ 		if (!trk.slot[s].active)
+ 			continue;
+-		for (i = 0; i < n; i++) {
+-			int dx = px[i] - trk.slot[s].x, dy = py[i] - trk.slot[s].y;
+-
+-			if (!taken[i] && dx * dx + dy * dy < best_d) {
+-				best = i;
+-				best_d = dx * dx + dy * dy;
+-			}
+-		}
+-		if (best < 0) {
++		if (!matched[s]) {
+ 			trk.slot[s].active = 0;
+ 			trk.slot[s].ended = 1;
+-			continue;
++			trk.slot[s].age = 0;
+ 		}
+-		taken[best] = 1;
+-		trk.slot[s].px = trk.slot[s].x;
+-		trk.slot[s].py = trk.slot[s].y;
+-		trk.slot[s].x = px[best];
+-		trk.slot[s].y = py[best];
+ 	}
++
++	/* Allocate new slots for unmatched points */
+ 	for (i = 0; i < n; i++) {
+ 		if (taken[i])
+ 			continue;
+@@ -671,9 +796,13 @@
+ 			break;
+ 		trk.slot[s].active = 1;
+ 		trk.slot[s].fresh = 1;
++		trk.slot[s].ended = 0;
+ 		trk.slot[s].id = trk.next_id++ & 0xffff;
++		trk.slot[s].age = 0;
+ 		trk.slot[s].x = trk.slot[s].px = px[i];
+ 		trk.slot[s].y = trk.slot[s].py = py[i];
++		trk.slot[s].sx = (int32_t)px[i] << 8;
++		trk.slot[s].sy = (int32_t)py[i] << 8;
+ 	}
+ 	for (s = 0; s < MAX_POINTS; s++)
+ 		active += trk.slot[s].active;
+@@ -828,7 +957,7 @@
+ 
+ static void ui_report(int active)
+ {
+-	int s, first = -1;
++	int s, oldest = -1, oldest_age = INT32_MAX;
+ 
+ 	if (opt.diagnostics)
+ 		diag.input_attempts++;
+@@ -845,12 +974,15 @@
+ 			ui_emit(EV_ABS, ABS_MT_TRACKING_ID, trk.slot[s].id);
+ 		ui_emit(EV_ABS, ABS_MT_POSITION_X, trk.slot[s].x);
+ 		ui_emit(EV_ABS, ABS_MT_POSITION_Y, trk.slot[s].y);
+-		if (first < 0)
+-			first = s;
++		/* track the slot with the greatest age (held longest) */
++		if (trk.slot[s].age < oldest_age) {
++			oldest_age = trk.slot[s].age;
++			oldest = s;
++		}
+ 	}
+-	if (first >= 0) {
+-		ui_emit(EV_ABS, ABS_X, trk.slot[first].x);
+-		ui_emit(EV_ABS, ABS_Y, trk.slot[first].y);
++	if (oldest >= 0) {
++		ui_emit(EV_ABS, ABS_X, trk.slot[oldest].x);
++		ui_emit(EV_ABS, ABS_Y, trk.slot[oldest].y);
+ 	}
+ 	if (!!active != ui.reported_touch) {
+ 		ui_emit(EV_KEY, BTN_TOUCH, !!active);

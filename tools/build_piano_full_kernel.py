@@ -45,8 +45,11 @@ FLASH_OVERRIDES={
  'CONFIG_V4L2_FLASH_LED_CLASS':'m','CONFIG_VIDEO_V4L2_SUBDEV_API':'y',
 }
 EARLY_CPUCP_OVERRIDES={'CONFIG_QCOM_CPUCP_MBOX':'y'}
-BLUETOOTH_OVERRIDES={'CONFIG_UHID':'m','CONFIG_HID_XIAOMI':'m',
+BLUETOOTH_OVERRIDES={'CONFIG_BT_LE':'y','CONFIG_BT_HIDP':'m',
+                    'CONFIG_UHID':'m','CONFIG_HID_XIAOMI':'m',
                     'CONFIG_BT_RFCOMM':'m','CONFIG_BT_RFCOMM_TTY':'y','CONFIG_BT_BNEP':'m'}
+USB_HOST_OVERRIDES={'CONFIG_USB_XHCI_PLATFORM':'y','CONFIG_USB_ROLE_SWITCH':'y',
+                   'CONFIG_USB_DWC3_DUAL_ROLE':'y','CONFIG_USB_HID':'y','CONFIG_HID_GENERIC':'y'}
 PEN_DOCK_OVERRIDES={'CONFIG_INPUT_XIAOMI_PIANO_PEN_DOCK':'m', 'CONFIG_CHARGER_SC96231':'m'}
 USERSPACE_SECURITY_OVERRIDES={'CONFIG_SECURITY_LANDLOCK':'y'}
 SLEEP_OVERRIDES={'CONFIG_QCOM_SMP2P_SLEEPSTATE':'y',
@@ -80,7 +83,7 @@ PLATFORM_OVERRIDES.update({key: 'm' for key in (
     'CONFIG_NFT_FIB_IPV4', 'CONFIG_NFT_FIB_IPV6', 'CONFIG_NFT_FIB_INET', 'CONFIG_NFT_COMPAT',
     'CONFIG_CRYPTO_USER_API_HASH', 'CONFIG_CRYPTO_USER_API_SKCIPHER')})
 PLATFORM_OVERRIDES.update({'CONFIG_FTRACE': 'y', 'CONFIG_ENABLE_DEFAULT_TRACERS': 'y'})
-ALLOWED_OVERRIDES={**BLUETOOTH_OVERRIDES,**PEN_DOCK_OVERRIDES,**FLASH_OVERRIDES,**EARLY_CPUCP_OVERRIDES,
+ALLOWED_OVERRIDES={**BLUETOOTH_OVERRIDES,**USB_HOST_OVERRIDES,**PEN_DOCK_OVERRIDES,**FLASH_OVERRIDES,**EARLY_CPUCP_OVERRIDES,
                    **USERSPACE_SECURITY_OVERRIDES,**SLEEP_OVERRIDES,**PM_DEBUG_OVERRIDES,**PLATFORM_OVERRIDES}
 
 
@@ -116,7 +119,7 @@ def command_line(fragment,public,root_policy):
 
 def module_overrides(fragment,kind='bluetooth'):
     lines=[line.strip()for line in fragment.splitlines()if line.strip()and not line.lstrip().startswith('#')]
-    expected=BLUETOOTH_OVERRIDES if kind=='bluetooth'else PEN_DOCK_OVERRIDES if kind=='pen-dock'else FLASH_OVERRIDES if kind=='flash'else EARLY_CPUCP_OVERRIDES if kind=='early-cpucp'else USERSPACE_SECURITY_OVERRIDES if kind=='userspace-security'else SLEEP_OVERRIDES if kind=='sleep'else PLATFORM_OVERRIDES if kind=='platform'else None
+    expected=BLUETOOTH_OVERRIDES if kind=='bluetooth'else USB_HOST_OVERRIDES if kind=='usb-host'else PEN_DOCK_OVERRIDES if kind=='pen-dock'else FLASH_OVERRIDES if kind=='flash'else EARLY_CPUCP_OVERRIDES if kind=='early-cpucp'else USERSPACE_SECURITY_OVERRIDES if kind=='userspace-security'else SLEEP_OVERRIDES if kind=='sleep'else PLATFORM_OVERRIDES if kind=='platform'else None
     if expected is None or lines!=[key+'='+value for key,value in expected.items()]:raise ValueError('Unexpected '+kind+' configuration fragment')
     return dict(expected)
 
@@ -255,7 +258,9 @@ def main():
     early_cpucp=ROOT/'linux/configs/piano-cpucp-early.config'
     userspace_security=ROOT/'linux/configs/piano-userspace-security.config'
     sleep=ROOT/'linux/configs/piano-sleep.config'
-    modules={**module_overrides(bluetooth.read_text()),**module_overrides(pen_dock.read_text(),'pen-dock'),
+    usb_host=ROOT/'linux/configs/piano-usb-host.config'
+    modules={**module_overrides(bluetooth.read_text()),**module_overrides(usb_host.read_text(),'usb-host'),
+             **module_overrides(pen_dock.read_text(),'pen-dock'),
              **module_overrides(flash.read_text(),'flash'),
              **module_overrides(early_cpucp.read_text(),'early-cpucp'),
              **module_overrides(userspace_security.read_text(),'userspace-security'),
@@ -280,7 +285,7 @@ def main():
     source_base=verify_source(work,commit)
     tree=text(['git','rev-parse','HEAD^{tree}'],work)
     compiler_checkout(work,compiler,commit,tree)
-    hashes={str(path.relative_to(ROOT)):sha(path)for path in (fragment,bluetooth,pen_dock,flash,early_cpucp,userspace_security,sleep,ROOT/'linux/configs/piano-platform.config',Path(__file__),ROOT/'tools/build_kernel.py',ROOT/'tools/prepare_linux_modules.py')}
+    hashes={str(path.relative_to(ROOT)):sha(path)for path in (fragment,bluetooth,usb_host,pen_dock,flash,early_cpucp,userspace_security,sleep,ROOT/'linux/configs/piano-platform.config',Path(__file__),ROOT/'tools/build_kernel.py',ROOT/'tools/prepare_linux_modules.py')}
     effective_text=effective_config(root_command,modules)
     effective=out/'piano-full.effective.config';effective.write_text(effective_text)
     command=['make','-C',compiler,'O='+str(out),'ARCH=arm64','LLVM=1','LLVM_IAS=1','LOCALVERSION=']
@@ -325,3 +330,4 @@ def main():
 
 
 if __name__=='__main__':main()
+

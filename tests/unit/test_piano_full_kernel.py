@@ -13,28 +13,41 @@ import build_piano_full_kernel as full
 
 
 class PianoFullKernelTests(unittest.TestCase):
-    def test_uhid_fragment_is_the_only_local_module_override(self):
+    def test_bluetooth_fragment_matches_overrides(self):
         fragment=(ROOT/'linux/configs/piano-bluetooth.config').read_text()
         modules=full.module_overrides(fragment)
-        public=(full.WORK/'arch/arm64/configs/piano_rootfs.config').read_text()
-        command=full.command_line((ROOT/'linux/configs/piano-full.config').read_text(),public,'ram')
-        config=(full.OUT/'.config').read_text()
-        values=full.config_values(config)
-        old='CONFIG_UHID='+values['CONFIG_UHID']if values['CONFIG_UHID']!='n'else '# CONFIG_UHID is not set'
-        updated=config.replace(old,'CONFIG_UHID=m')
-        requirements=full.validate_config(updated,public,command,modules)
-        self.assertEqual(requirements['UHID'],'m')
-        self.assertEqual(full.config_values(full.effective_config(command,modules))['CONFIG_UHID'],'m')
-        with self.assertRaisesRegex(ValueError,'module requirement'):
-            full.validate_config(config,public,command,modules)
-        for bad in ('CONFIG_UHID=y\n','CONFIG_UHID=n\n','CONFIG_UHID=m\nCONFIG_BT_LE=y\n','CONFIG_UHID=m\nCONFIG_UHID=n\n'):
+        self.assertEqual(modules['CONFIG_BT_LE'],'y')
+        self.assertEqual(modules['CONFIG_BT_HIDP'],'m')
+        self.assertEqual(modules['CONFIG_UHID'],'m')
+        self.assertEqual(modules['CONFIG_HID_XIAOMI'],'m')
+        self.assertEqual(modules['CONFIG_BT_RFCOMM'],'m')
+        self.assertEqual(modules['CONFIG_BT_RFCOMM_TTY'],'y')
+        self.assertEqual(modules['CONFIG_BT_BNEP'],'m')
+        self.assertEqual(len(modules),len(full.BLUETOOTH_OVERRIDES))
+        for bad in ('CONFIG_UHID=y\n','CONFIG_BT_LE=y\n','CONFIG_BT_LE=y\nCONFIG_BT_HIDP=m\n',
+                    'CONFIG_BT_LE=n\nCONFIG_BT_HIDP=m\nCONFIG_UHID=m\nCONFIG_HID_XIAOMI=m\nCONFIG_BT_RFCOMM=m\nCONFIG_BT_RFCOMM_TTY=y\nCONFIG_BT_BNEP=m\n'):
             with self.subTest(fragment=bad),self.assertRaises(ValueError):full.module_overrides(bad)
-        with self.assertRaises(ValueError):full.validate_config(updated,public,command,{'CONFIG_BT_LE':'y'})
-        for name,value in full.config_values(public).items():
-            if name=='CONFIG_CMDLINE':continue
-            changed=updated.replace(name+'='+value,name+'='+('n'if value!='n'else 'y'))
-            if changed!=updated:
-                with self.subTest(symbol=name),self.assertRaises(ValueError):full.validate_config(changed,public,command,modules)
+
+    def test_usb_host_fragment_matches_overrides(self):
+        fragment=(ROOT/'linux/configs/piano-usb-host.config').read_text()
+        modules=full.module_overrides(fragment,'usb-host')
+        self.assertEqual(modules['CONFIG_USB_XHCI_PLATFORM'],'y')
+        self.assertEqual(modules['CONFIG_USB_ROLE_SWITCH'],'y')
+        self.assertEqual(modules['CONFIG_USB_DWC3_DUAL_ROLE'],'y')
+        self.assertEqual(modules['CONFIG_USB_HID'],'y')
+        self.assertEqual(modules['CONFIG_HID_GENERIC'],'y')
+        self.assertEqual(len(modules),len(full.USB_HOST_OVERRIDES))
+        for bad in ('CONFIG_USB_XHCI_PLATFORM=m\n','CONFIG_USB_HID=y\n',
+                    'CONFIG_USB_XHCI_PLATFORM=y\nCONFIG_USB_ROLE_SWITCH=y\nCONFIG_USB_DWC3_DUAL_ROLE=y\nCONFIG_USB_HID=m\nCONFIG_HID_GENERIC=y\n'):
+            with self.subTest(fragment=bad),self.assertRaises(ValueError):full.module_overrides(bad,'usb-host')
+
+    def test_usb_host_and_bluetooth_in_allowed_overrides(self):
+        for key,value in full.USB_HOST_OVERRIDES.items():
+            self.assertIn(key,full.ALLOWED_OVERRIDES)
+            self.assertEqual(full.ALLOWED_OVERRIDES[key],value)
+        for key,value in full.BLUETOOTH_OVERRIDES.items():
+            self.assertIn(key,full.ALLOWED_OVERRIDES)
+            self.assertEqual(full.ALLOWED_OVERRIDES[key],value)
 
     def test_real_generated_full_config_preserves_public_profile(self):
         full.verify_source();public=(full.WORK/'arch/arm64/configs/piano_rootfs.config').read_text()

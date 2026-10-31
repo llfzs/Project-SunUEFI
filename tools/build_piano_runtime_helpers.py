@@ -49,6 +49,7 @@ TOUCH_CAPTURE_PATCH=ROOT/'tools/patches/piano-touch-view-raw-capture.patch'
 TOUCH_PEN_PATCH=ROOT/'tools/patches/piano-touch-view-pen-owner.patch'
 TOUCH_EPOCH_PATCH=ROOT/'tools/patches/piano-touch-view-epoch-reset.patch'
 TOUCH_LINE_NOISE_PATCH=ROOT/'tools/patches/piano-touch-view-line-noise.patch'
+TOUCH_DRAG_PATCH=ROOT/'tools/patches/piano-touch-view-drag-stability.patch'
 CAMERAD_CCM_PATCH=ROOT/'tools/patches/piano-camerad-writable-ccm.patch'
 CAMERAD_AE_PATCH=ROOT/'tools/patches/piano-camerad-stable-ae.patch'
 CAMERAD_FRAME_PATCH=ROOT/'tools/patches/piano-camerad-frame-integrity.patch'
@@ -90,7 +91,7 @@ def derive_touch_source(public, output):
     folder=Path(output)/'piano-touch-source';target=folder/relative
     target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(original,target)
     patches=[]
-    for patch in (TOUCH_DIAGNOSTICS_PATCH,TOUCH_CAPTURE_PATCH,TOUCH_PEN_PATCH,TOUCH_EPOCH_PATCH,TOUCH_LINE_NOISE_PATCH):
+    for patch in (TOUCH_DIAGNOSTICS_PATCH,TOUCH_CAPTURE_PATCH,TOUCH_PEN_PATCH,TOUCH_EPOCH_PATCH,TOUCH_LINE_NOISE_PATCH,TOUCH_DRAG_PATCH):
         if patch==TOUCH_PEN_PATCH:
             subprocess.run(['patch','--batch','--forward','--fuzz=0',
                             '--no-backup-if-mismatch','-p1','-i',str(patch)],cwd=folder,check=True)
@@ -326,6 +327,8 @@ def build(args):
     inputs[str(TOUCH_CAPTURE_PATCH)]=sha(TOUCH_CAPTURE_PATCH)
     inputs[str(TOUCH_PEN_PATCH)]=sha(TOUCH_PEN_PATCH)
     inputs[str(TOUCH_EPOCH_PATCH)]=sha(TOUCH_EPOCH_PATCH)
+    inputs[str(TOUCH_LINE_NOISE_PATCH)]=sha(TOUCH_LINE_NOISE_PATCH)
+    inputs[str(TOUCH_DRAG_PATCH)]=sha(TOUCH_DRAG_PATCH)
     for patch in (CAMERAD_CCM_PATCH,CAMERAD_AE_PATCH,CAMERAD_FRAME_PATCH,CAMERAD_MANUAL_PATCH,CAMERAD_TIMING_PATCH):
         inputs[str(patch)]=sha(patch)
     for name,pin in TOOL_PINS.items():
@@ -421,3 +424,4 @@ def parser():
 
 if __name__=='__main__':
     result=build(parser().parse_args());print(json.dumps({'status':result['status'],'kernel_release':result['kernel']['release'],'runtime_files':len(result['runtime_files'])},indent=2))
+
