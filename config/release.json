@@ -115,7 +115,7 @@
   "login": {
     "user": "piano",
     "autologin": true,
-    "password": "piano123456"
+    "password": "piano"
   },
   "reproducibility": "source identities and actual package/metadata hashes recorded; complete bit reproducibility is not claimed"
 }
