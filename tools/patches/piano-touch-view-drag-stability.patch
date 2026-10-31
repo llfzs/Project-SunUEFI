@@ -1,30 +1,35 @@
-Subject: [PATCH] Stabilise drag: hysteresis, NMS, global tracking, smoothing
+Subject: [PATCH] Stabilise drag v2: stop the peak tie from flipping, keep the
+ rest of the stability fixes
 
-Four defects cause window jitter during slow touch drags on the 3200x2136
-panel (sensor grid ~40x60, one cell ~53 px):
+Same fixes as the first attempt (hysteresis release, non-maximum
+suppression, global nearest-neighbour tracking, ABS_X/ABS_Y following the
+longest-held contact, one-pole low-pass with a fast-move bypass), plus the
+change that the diagonal-jitter report actually called for.
 
-1. No hysteresis — find_points() uses a fixed threshold; a stationary
-   finger's capacitance blob oscillates across it, producing repeated
-   lift/repress events.
-2. No non-maximum suppression — one finger can leave two adjacent 3x3
-   maxima, creating a ghost contact that competes for the drag.
-3. Per-slot greedy matching in track() — two crossing fingers swap slots,
-   handing the drag to the wrong finger for multiple frames.
-4. ui_report() binds ABS_X/ABS_Y to the lowest-numbered active slot
-   instead of the longest-held contact; the compositor's pointer
-   emulation follows the wrong finger.
+The remaining defect was in candidate selection.  find_points() sorted its
+3x3 maxima by peak strength only, so for the two (or four) nodes a finger sits
+between, the winner could still flip from frame to frame: the centroid window
+moved one cell diagonally, x and y jumped ~53 px at once, and the window the
+compositor is dragging snapped sideways.  A horizontal drag stays inside one
+sensor row, so the winner never changed and the symptom did not appear there.
 
-Fixes:
-- Tracked contacts stay alive at threshold/2 within PEAK_HOLD_CELLS (2).
-- Candidates sorted by peak strength; weaker peaks within PEAK_MIN_DIST
-  (2 cells ~107 px) are suppressed.
-- track() uses iterative global-minimum pairing (no slot swap).
-- New slot_move(): 8.8 fixed-point low-pass (SMOOTH_ALPHA=96/256) with
-  snap bypass above SMOOTH_SNAP_DIST (24 px).
-- ui_report() ABS_X/ABS_Y follows the slot with the greatest age.
+Candidates are now a named struct at file scope and are ordered
 
-Tuning knobs are the four macros at the top of the file.  Threshold
-default, report rate, coordinate transform and pen decode are unchanged.
+    tracked contact first -> stronger peak -> scan order
+
+so the peak that already belongs to a tracked finger always wins the tie, and
+scan order makes every remaining tie deterministic instead of frame-dependent.
+Because the sorted list drives non-maximum suppression, this also stops a
+fresh neighbour peak from cancelling a contact the tracker is holding.
+
+The first attempt also selected the ABS_X/ABS_Y source slot with an inverted
+comparison: `oldest_age` started at INT32_MAX and was updated on
+`slot.age < oldest_age`, so the variables said "held longest" while the code
+picked the youngest contact -- the compositor moves the dragged window from
+these two axes, so the drag followed whichever finger had landed last.  Fixed
+to start at -1 and compare with `>`.
+
+Threshold default, report rate, coordinate transform and pen decode unchanged.
 
 --- a/initramfs/touch-view/piano-touch-view.c
 +++ b/initramfs/touch-view/piano-touch-view.c
@@ -49,7 +54,44 @@ default, report rate, coordinate transform and pen decode are unchanged.
  	} slot[MAX_POINTS];
  } trk;
  
-@@ -479,14 +486,24 @@
+@@ -476,17 +483,61 @@
+ 	int peak;
+ };
+ 
++/* Candidate 3x3 maxima for one frame.  Named type at file scope so qsort()'s
++ * comparator can see it.  `held' marks a peak that belongs to an already
++ * tracked contact, `order' is the scan index of the peak node.
++ */
++struct peak_cand {
++	double x, y;
++	int peak;
++	int held;
++	int order;
++};
++
++/* Ordering: tracked contact first, then stronger, then earlier in the scan.
++ *
++ * The sensor matrix is ~40x60 over a 3200x2136 panel, so one cell is ~53 px.
++ * When a finger sits between two diagonal neighbours of (almost) equal delta,
++ * the 3x3 maximum and the centroid window hop between those two nodes from
++ * frame to frame, and x and y jump at the same time: a diagonal drag jitters,
++ * a horizontal one does not, because there the winner stays in the same row.
++ * Sorting by strength alone keeps that flip alive for the two candidates that
++ * already belong to a tracked contact.  Putting `held' first means the peak
++ * the tracker is already following always wins, and `order' turns every
++ * remaining tie into a deterministic, frame-independent choice.
++ */
++static int cmp_peak(const void *a, const void *b)
++{
++	const struct peak_cand *pa = a, *pb = b;
++
++	if (pa->held != pb->held)
++		return pb->held - pa->held;
++	if (pa->peak != pb->peak)
++		return pb->peak - pa->peak;
++	return pa->order - pb->order;
++}
++
  static int find_points(struct point *pts)
  {
  	int r, c, dr, dc, n = 0;
@@ -61,7 +103,7 @@ default, report rate, coordinate transform and pen decode are unchanged.
 +	 * threshold.  Already-tracked slots get hysteresis: their peaks only
 +	 * need hold_threshold and must fall within PEAK_HOLD_CELLS of the
 +	 * slot's last known sensor position. */
-+	struct { double x, y; int peak; int held; } cand[MAX_POINTS * 4];
++	struct peak_cand cand[MAX_POINTS * 4];
 +	int ncand = 0;
 +
 +	for (r = 0; r < st.rows && ncand < MAX_POINTS * 4; r++) {
@@ -77,7 +119,7 @@ default, report rate, coordinate transform and pen decode are unchanged.
  			for (dr = -1; dr <= 1 && is_peak; dr++)
  				for (dc = -1; dc <= 1; dc++) {
  					int rr = r + dr, cc = c + dc;
-@@ -494,7 +511,6 @@
+@@ -494,7 +545,6 @@
  					if ((!dr && !dc) || rr < 0 || cc < 0 ||
  					    rr >= st.rows || cc >= st.cols)
  						continue;
@@ -85,7 +127,7 @@ default, report rate, coordinate transform and pen decode are unchanged.
  					if (delta[rr * st.cols + cc] > v ||
  					    (delta[rr * st.cols + cc] == v &&
  					     (dr < 0 || (dr == 0 && dc < 0)))) {
-@@ -504,6 +520,26 @@
+@@ -504,6 +554,26 @@
  				}
  			if (!is_peak)
  				continue;
@@ -112,7 +154,7 @@ default, report rate, coordinate transform and pen decode are unchanged.
  			for (dr = -1; dr <= 1; dr++)
  				for (dc = -1; dc <= 1; dc++) {
  					int rr = r + dr, cc = c + dc, w;
-@@ -518,11 +554,50 @@
+@@ -518,11 +588,44 @@
  					sx += w * (cc + 0.5);
  					sy += w * (rr + 0.5);
  				}
@@ -125,25 +167,19 @@ default, report rate, coordinate transform and pen decode are unchanged.
 +				cand[ncand].y = sy / sw;
 +				cand[ncand].peak = v;
 +				cand[ncand].held = held;
++				cand[ncand].order = ncand;
 +				ncand++;
 +			}
 +		}
 +	}
 +
-+	/* Pass 2: non-maximum suppression — sort by peak descending, keep
-+	 * only the strongest within PEAK_MIN_DIST cell distance. */
++	/* Pass 2: non-maximum suppression — sort so that tracked contacts come
++	 * first (then strongest, then earliest scanned), and keep only the first
++	 * peak within PEAK_MIN_DIST cell distance. */
 +	{
 +		int i, j;
-+		/* simple insertion sort (ncand is small) */
-+		for (i = 1; i < ncand; i++) {
-+			typeof(cand[0]) tmp = cand[i];
-+			j = i - 1;
-+			while (j >= 0 && cand[j].peak < tmp.peak) {
-+				cand[j + 1] = cand[j];
-+				j--;
-+			}
-+			cand[j + 1] = tmp;
-+		}
++
++		qsort(cand, ncand, sizeof(cand[0]), cmp_peak);
 +		{
 +			int suppressed[MAX_POINTS * 4];
 +			memset(suppressed, 0, sizeof(suppressed));
@@ -167,7 +203,7 @@ default, report rate, coordinate transform and pen decode are unchanged.
  			}
  		}
  	}
-@@ -627,41 +702,91 @@
+@@ -627,41 +730,91 @@
  		*y = height - 1;
  }
  
@@ -220,7 +256,7 @@ default, report rate, coordinate transform and pen decode are unchanged.
 +					continue;
 +				for (i = 0; i < n; i++) {
 +					int dx, dy, d2;
- 
++
 +					if (taken[i])
 +						continue;
 +					dx = px[i] - trk.slot[s].x;
@@ -243,7 +279,7 @@ default, report rate, coordinate transform and pen decode are unchanged.
 +			trk.slot[best_s].ended = 0;
 +		}
 +	}
-+
+ 
 +	/* Deactivate unmatched slots */
 +	for (s = 0; s < MAX_POINTS; s++) {
  		trk.slot[s].fresh = 0;
@@ -276,7 +312,7 @@ default, report rate, coordinate transform and pen decode are unchanged.
  	for (i = 0; i < n; i++) {
  		if (taken[i])
  			continue;
-@@ -671,9 +796,13 @@
+@@ -671,9 +824,13 @@
  			break;
  		trk.slot[s].active = 1;
  		trk.slot[s].fresh = 1;
@@ -290,23 +326,26 @@ default, report rate, coordinate transform and pen decode are unchanged.
  	}
  	for (s = 0; s < MAX_POINTS; s++)
  		active += trk.slot[s].active;
-@@ -828,7 +957,7 @@
+@@ -828,7 +985,7 @@
  
  static void ui_report(int active)
  {
 -	int s, first = -1;
-+	int s, oldest = -1, oldest_age = INT32_MAX;
++	int s, oldest = -1, oldest_age = -1;
  
  	if (opt.diagnostics)
  		diag.input_attempts++;
-@@ -845,12 +974,15 @@
+@@ -845,12 +1002,18 @@
  			ui_emit(EV_ABS, ABS_MT_TRACKING_ID, trk.slot[s].id);
  		ui_emit(EV_ABS, ABS_MT_POSITION_X, trk.slot[s].x);
  		ui_emit(EV_ABS, ABS_MT_POSITION_Y, trk.slot[s].y);
 -		if (first < 0)
 -			first = s;
-+		/* track the slot with the greatest age (held longest) */
-+		if (trk.slot[s].age < oldest_age) {
++		/* ABS_X/ABS_Y must follow the contact held longest: the
++		 * compositor moves the dragged window from these two axes, so
++		 * following the newest contact hands the drag to whichever
++		 * finger landed last.  age counts matched frames. */
++		if (trk.slot[s].age > oldest_age) {
 +			oldest_age = trk.slot[s].age;
 +			oldest = s;
 +		}

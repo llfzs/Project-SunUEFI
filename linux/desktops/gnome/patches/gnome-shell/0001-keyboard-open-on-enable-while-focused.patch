@@ -1,0 +1,58 @@
+From: piano-linux bring-up <noreply@example.invalid>
+Subject: [PATCH 1/2] ui/keyboard: open the OSK when it is enabled while a text
+ input already has focus
+
+On a Wayland session the on-screen keyboard is opened only by the input
+controller's panel-state notification.  KeyboardManager._syncEnabled() merely
+constructs the Keyboard actor, and the focus-changed -> open() path in
+Keyboard._init() is guarded by `!Meta.is_wayland_compositor()`, so it never
+runs here.
+
+With the project default screen-keyboard-enabled=false, the actor exists only
+while the seat reports touch mode AND the last input device was a touchscreen.
+Tap a phone-number field at the moment any other input device is "last" (the
+pen tablet-tool uinput that piano-touch-input --pen-input creates, a keyboard
+touchpad, a paired Bluetooth mouse) and `enabled` is false, `_keyboard` is
+null, and the panel-state notification mutter sends for that focus arrives
+nowhere.  It is not replayed.  Result: no keyboard.
+
+The next text commit — pasting a number, typing — makes mutter notify again.
+By then a touch event has turned touch mode on and _syncEnabled() has built
+the actor, so the notification finally has a listener and the keyboard shows
+up (with the phone layout, which is why the layout itself was never the
+problem).
+
+Fix: when _syncEnabled() creates the actor and a text input already has
+focus, open it, doing what the missed notification would have done.  The call
+mirrors _onKeyboardStateChanged(), including its argument.  Where the
+auto-detection was already enabled the actor exists, this branch is not
+reached, and behaviour is unchanged.
+
+Applies to upstream GNOME Shell 48 (gnome-48 branch), tested against
+js/ui/keyboard.js at the head of that branch.
+Forwarded: no
+
+--- a/js/ui/keyboard.js
++++ b/js/ui/keyboard.js
+@@ -1114,6 +1114,21 @@ export class KeyboardManager extends Signals.EventEmitter {
+                 this.emit('visibility-changed');
+                 this._bottomDragAction.enabled = !this._keyboard.visible;
+             });
++
++            /* Nothing here opens the keyboard.  On Wayland the only thing that
++             * does is the input controller's panel-state notification
++             * (_onKeyboardStateChanged); the focus-changed path right above is
++             * explicitly X11-only.  So if this object did not exist yet when
++             * the text field got focus — because the seat was not in touch
++             * mode, or the last input device was not the touchscreen — that
++             * notification went nowhere and is never replayed.  Creating the
++             * keyboard now leaves a focused field with no keyboard until the
++             * client commits its text again (a paste, a keystroke), which is
++             * exactly the "tap the phone-number field, no keyboard; paste,
++             * and it appears" symptom.  Mirror what panel-state would have
++             * done, including the (truthy) argument upstream passes: */
++            if (Main.inputMethod?.currentFocus)
++                this._keyboard.open(Main.layoutManager.focusIndex);
+         } else if (!enabled && this._keyboard) {
+             this._keyboard.setCursorLocation(null);
+             this._keyboard.destroy();

@@ -3,3 +3,13 @@
 # The brackets in data_role identify the active role, e.g. "host [device]".
 ACTION!="remove", SUBSYSTEM=="typec", KERNEL=="port0", TAG+="systemd", ENV{SYSTEMD_ALIAS}="/sys/subsystem/typec/devices/%k", ENV{SYSTEMD_READY}="0"
 ACTION!="remove", SUBSYSTEM=="typec", KERNEL=="port0", ATTR{orientation}=="normal|reverse", ATTR{data_role}=="*[[]device[]]*", ENV{SYSTEMD_READY}="1", ENV{SYSTEMD_WANTS}+="piano-usb.service"
+# The port went host: release the NCM gadget right now, in the event itself.
+# Waiting for systemd is too late for the first enumeration attempt.  Losing
+# SYSTEMD_READY above only deactivates the .device unit, and piano-usb.service
+# is stopped by its BindsTo= a scheduler tick later, while dwc3 already tries
+# to switch to host role inside the kernel.  If the gadget is still bound the
+# controller refuses the role change, and the attached keyboard or stick is
+# never powered or enumerated -- the "Type-C does nothing" symptom.
+# "usb-network stop" unbinds only when $g/UDC is non-empty, so this is
+# idempotent and harmless next to the unit's own ExecStop.
+ACTION!="remove", SUBSYSTEM=="typec", KERNEL=="port0", ATTR{data_role}=="*[[]host[]]*", RUN+="/usr/lib/piano/usb-network stop"
