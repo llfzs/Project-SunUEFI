@@ -95,6 +95,36 @@ P81C 的 137 字节 HID Report Map 将私有 Report5 数据放在键盘 Usage Pa
 
 笔尖位置、压力和悬停仍通过标准 tablet-tool 接口输出。光标外观由桌面和应用决定，不能靠把笔伪装成触摸屏解决。`piano-pen-canvas` 在自己的画布内对笔事件使用隐藏光标，鼠标／触控板事件恢复普通光标，画布之外不改桌面全局设置。其他应用的笔光标遵循各自设置。
 
+## 没有触控笔的主机
+
+笔支持让触控控制器一直留在 stylus 扫描模式，即使空面板也按约 120 次/秒上报，并常驻一个 `pen-bluetooth` 进程。没有笔的主机可以只保留手指输入，判据是 `/etc/piano/no-pen` 这个标记文件：存在时 `touch-input` 先 `echo 0 > /proc/nvt_thp_stylus` 关掉笔扫描，不启动 `pen-bluetooth`，也不给 `piano-touch-view` 传 `--pen-ini`／`--pen-input`。
+
+标记文件不属于任何包，刷机后一定丢失，需要重建：
+
+```sh
+sudo touch /etc/piano/no-pen
+sudo systemctl restart piano-touch.service
+```
+
+只有标记还不够：`/usr/lib/piano/touch-input` 必须是带这个分支的版本（1717 字节；更早的 1316 字节版本没有判断，建了标记也不会生效）。刷到旧镜像时先把仓库里的脚本装上去，注意保持 LF，CRLF 的 shebang 会让服务报 `status 203/EXEC`：
+
+```sh
+scp linux/userspace/pen/piano-touch-input piano@HOST:/tmp/
+ssh piano@HOST 'sudo cp -a /usr/lib/piano/touch-input /usr/lib/piano/touch-input.orig-nopen &&
+                sudo install -o root -g root -m 755 /tmp/piano-touch-input /usr/lib/piano/touch-input &&
+                sudo systemctl restart piano-touch.service'
+```
+
+验证（前两项是进程参数，第三项要 5 秒内不增长）：
+
+```sh
+cat /proc/nvt_thp_stylus                 # 0
+pgrep -af 'piano-touch-view|pen-bluetooth'  # 只有 piano-touch-view input --seconds 0
+grep NVT-ts-spi /proc/interrupts         # 计数不再增长
+```
+
+关掉笔扫描只消除了控制器的 120 次/秒中断，`piano-touch-view` 自己仍按约 8.3 ms 周期轮询（空载约 5 % CPU，每秒约 120 次主动上下文切换）。这一项与笔无关，两种模式都一样。
+
 ## 构建与校准打包入口
 
 `tools/build_release_helpers.py` 与 `tools/build_piano_runtime_helpers.py` 已共用 `build_pen_core()`，从源码副本调用这里的 Makefile。默认 native runtime bundle 包含 `/usr/bin/piano-pen-offline`、`/usr/bin/piano-pen-canvas`、`/usr/lib/piano/pen-bluetooth`，以及 Apache-2.0 许可和来源说明。编译清单记录 C／C++ 源码、头文件、Makefile、工具链和目标静态 C++ 库；离线工具是 ARM64 静态程序，构建不需要原厂 ini。
