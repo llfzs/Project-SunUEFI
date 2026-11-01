@@ -328,6 +328,25 @@ jobs:
               --notes "自动构建 (${GITHUB_SHA::7})，不含 steamos。合并方法: cat *.part* > x.zst && zstd -d x.zst" \
               --prerelease || true
           gh release upload "$TAG" "${assets[@]}" --clobber
+      - name: Stage kernel archive for device verification
+        if: matrix.target == 'linux'
+        run: |
+          mkdir -p artifacts/downloads/kernel
+          # Tar instead of uploading the tree: modules/ contains absolute
+          # build/source symlinks that a device install would inherit.
+          tar -C artifacts/kernels/release -cf - \
+            Image System.map config manifest.json modules | gzip -1 \
+            > artifacts/downloads/kernel/sunuefi-kernel.tar.gz
+          ls -lh artifacts/downloads/kernel/
+      - name: Kernel for device verification
+        if: matrix.target == 'linux'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: SunUEFI-Kernel
+          path: artifacts/downloads/kernel/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
       - name: Stage build logs for the combined archive
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
