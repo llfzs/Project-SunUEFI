@@ -41,6 +41,19 @@ class PianoFullKernelTests(unittest.TestCase):
                     'CONFIG_USB_XHCI_PLATFORM=y\nCONFIG_USB_ROLE_SWITCH=y\nCONFIG_USB_DWC3_DUAL_ROLE=y\nCONFIG_USB_HID=m\nCONFIG_HID_GENERIC=y\n'):
             with self.subTest(fragment=bad),self.assertRaises(ValueError):full.module_overrides(bad,'usb-host')
 
+    def test_filesystem_fragment_matches_overrides(self):
+        fragment=(ROOT/'linux/configs/piano-filesystem.config').read_text()
+        modules=full.module_overrides(fragment,'filesystem')
+        for symbol in ('CONFIG_EXFAT_FS','CONFIG_NTFS3_FS','CONFIG_NTFS3_LZX_XPRESS','CONFIG_NLS_UTF8'):
+            self.assertEqual(modules[symbol],'y')
+        self.assertEqual(len(modules),len(full.FILESYSTEM_OVERRIDES))
+        for bad in ('CONFIG_EXFAT_FS=m\n',
+                    'CONFIG_EXFAT_FS=y\nCONFIG_NTFS3_FS=y\nCONFIG_NTFS3_LZX_XPRESS=y\nCONFIG_NLS_UTF8=m\n'):
+            with self.subTest(fragment=bad),self.assertRaises(ValueError):full.module_overrides(bad,'filesystem')
+        for key,value in modules.items():
+            self.assertEqual(full.ALLOWED_OVERRIDES[key],value)
+            self.assertEqual(full.REQUIRED[key.removeprefix('CONFIG_')],value)
+
     def test_usb_host_and_bluetooth_in_allowed_overrides(self):
         for key,value in full.USB_HOST_OVERRIDES.items():
             self.assertIn(key,full.ALLOWED_OVERRIDES)
