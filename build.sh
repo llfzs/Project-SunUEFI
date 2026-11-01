@@ -17,6 +17,7 @@ case "$command" in
   steamos-rootfs) python3 tools/build_steamos_rootfs.py "$@" ;;
   nyarch-rootfs|nyarch-gnome-rootfs) python3 tools/build_nyarch_rootfs.py "$@" ;;
   gsd) python3 tools/build_gsd_packages.py "$@" ;;
+  gnome-shell) python3 tools/build_gnome_shell_packages.py "$@" ;;
   mutter)
     if (($#)); then
       python3 tools/build_mutter_packages.py "$@"

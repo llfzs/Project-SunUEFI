@@ -489,6 +489,35 @@ def mutter_packages(folder):
             'packages': rows, 'device_verified': False}
 
 
+def gnome_shell_packages(folder):
+    """Use the standard GNOME Shell packages carrying the on-screen keyboard fix."""
+    import build_gnome_shell_packages as builder
+    folder = Path(folder).resolve()
+    metadata = folder.parent / 'SOURCE.json'
+    if (folder.parent / '.incomplete').exists():
+        raise ValueError('GNOME Shell package build has not completed')
+    source = json.loads(metadata.read_text())
+    if (source.get('packages_built') is not True or
+            source.get('patches') != builder.patch_records() or
+            source.get('source', {}).get('package') != 'gnome-shell' or
+            source.get('source', {}).get('version') != builder.SOURCE_VERSION):
+        raise ValueError('GNOME Shell packages do not match the keyboard patches; rebuild with ./build.sh gnome-shell')
+    rows = {}
+    for path in sorted(folder.glob('*.deb')):
+        package, version, arch = [capture(['dpkg-deb', '-f', path, field])
+                                  for field in ('Package', 'Version', 'Architecture')]
+        row = {'file': path.name, 'version': version, 'architecture': arch, 'sha256': digest(path)}
+        if (package in rows or builder.RUNTIME.get(package) != arch or
+                version != builder.PACKAGE_VERSION or
+                source.get('packages', {}).get(package) != row):
+            raise ValueError('GNOME Shell runtime package identity differs: ' + path.name)
+        rows[package] = row
+    if set(rows) != set(builder.RUNTIME):
+        raise ValueError('The complete standard GNOME Shell runtime package set is required')
+    return {'source_sha256': digest(metadata), 'patches': source['patches'],
+            'packages': rows, 'device_verified': False}
+
+
 def bootstrap(rootfs, kernel, output, release, boot_task_snapshot=False, firmware_root=None):
     # Use the same authenticated distro input on fresh CI and local builds.
     # The early diagnostic BusyBox capture is not a release dependency.
@@ -592,6 +621,11 @@ def execute(record):
             run([sys.executable, ROOT / 'tools/build_mutter_packages.py', '--output',
                  mutter_folder.parent, '--sysroot', rootfs])
         mutter = mutter_packages(mutter_folder) if desktop == 'gnome' else {'packages': {}}
+        gnome_shell_folder = ROOT / 'build/gnome-shell/runtime'
+        if desktop == 'gnome' and not (gnome_shell_folder.parent / 'SOURCE.json').is_file():
+            run([sys.executable, ROOT / 'tools/build_gnome_shell_packages.py', '--output',
+                 gnome_shell_folder.parent, '--sysroot', rootfs])
+        gnome_shell = gnome_shell_packages(gnome_shell_folder) if desktop == 'gnome' else {'packages': {}}
         gsd_stage = target(rootfs, 'tmp/piano-gnome-packages')
         gsd_stage.mkdir(parents=True, exist_ok=True)
         for row in gsd['packages'].values():
@@ -601,6 +635,11 @@ def execute(record):
             shutil.copy2(mutter_folder / row['file'], destination)
             if digest(destination) != row['sha256']:
                 raise ValueError('Mutter package changed while staging: ' + row['file'])
+        for row in gnome_shell['packages'].values():
+            destination = gsd_stage / row['file']
+            shutil.copy2(gnome_shell_folder / row['file'], destination)
+            if digest(destination) != row['sha256']:
+                raise ValueError('GNOME Shell package changed while staging: ' + row['file'])
         sensor_stage = target(rootfs, 'tmp/piano-sensors-packages')
         sensor_stage.mkdir(parents=True, exist_ok=True)
         for row in sensors['packages'].values():
@@ -622,6 +661,8 @@ def execute(record):
                                   for row in gsd['packages'].values())
             local_packages.extend('/tmp/piano-gnome-packages/' + row['file']
                                   for row in mutter['packages'].values())
+            local_packages.extend('/tmp/piano-gnome-packages/' + row['file']
+                                  for row in gnome_shell['packages'].values())
             if ffmpeg:
                 local_packages.extend('/tmp/piano-ffmpeg-packages/' + row['file']
                                       for row in ffmpeg['packages'].values())

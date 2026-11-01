@@ -11,7 +11,7 @@ wired into a build:
 | --- | --- | --- |
 | `mutter/` | `tools/build_mutter_packages.py` (`PATCHES`), `tools/build_nyarch_rootfs.py` | lands in the mutter package / rootfs |
 | `control-center/` | `tools/build_nyarch_rootfs.py` | lands in the rootfs |
-| `gnome-shell/` | **nothing** | a file here has **zero** effect on any image until you build gnome-shell yourself |
+| `gnome-shell/` | `tools/build_gnome_shell_packages.py` (Debian) + `tools/build_release_rootfs.py` installs `build/gnome-shell/runtime` | lands in the gnome-shell package; the on-screen-keyboard fix now reaches the tablet image |
 
 A patch dropped in this directory therefore never reaches the tablet. That is why the
 on-screen-keyboard fix did not change anything on the device: it was not overridden or
@@ -21,9 +21,12 @@ reverted, it was simply never packaged. Grep before you assume otherwise:
 grep -rn "patches/gnome-shell" . --include="*.py" --include="*.sh" --include="PKGBUILD"
 ```
 
-There is no `gnome-shell` package recipe in this repository (compare
-`linux/desktops/gnome/arch/mutter/PKGBUILD`, which does exist for mutter), so the build
-has to come from the distro side.
+A Debian packaging channel now exists: `tools/build_gnome_shell_packages.py` builds the
+patched `gnome-shell`/`gnome-shell-common` packages (mirroring `build_mutter_packages.py`)
+and `tools/build_release_rootfs.py` installs them into the release rootfs when
+`desktop == 'gnome'`. There is still no Arch/Nyarch `PKGBUILD` for gnome-shell
+(compare `linux/desktops/gnome/arch/mutter/PKGBUILD`); Nyarch builds still need a PKGBUILD
+that applies these two patches, or a manual `apt-get source gnome-shell` rebuild as below.
 
 ## Patches here
 
