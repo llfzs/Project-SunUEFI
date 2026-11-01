@@ -108,8 +108,7 @@ def build(output, jobs, install_dependencies=False):
     cache = ROOT / 'build/source-cache/ffmpeg-7.1.5-source' / archive['filename']
     url = record['source']['dsc_url'].rsplit('/', 1)[0] + '/' + archive['filename']
     if not cache.exists():
-        with urllib.request.urlopen(url, timeout=60) as response:
-            cache.write_bytes(response.read())
+        cache.write_bytes(source.download(url))
     if cache.stat().st_size != archive['size'] or sha(cache) != archive['sha256']:
         raise ValueError('Debian FFmpeg packaging archive checksum mismatch')
     with tarfile.open(cache, 'r:xz') as stream:

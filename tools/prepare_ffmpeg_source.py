@@ -8,14 +8,43 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import time
+import urllib.error
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 SERIES = ROOT / 'linux/bsp/patches/ffmpeg/series.json'
+ATTEMPTS = 4
 
 
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def download(url):
+    """Fetch a pinned archive, tolerating a dropped connection.
+
+    deb.debian.org resets the odd TLS handshake, and a single reset used to
+    fail an entire rootfs build (nyarch-gnome died mid `prepare` on
+    [Errno 104] Connection reset by peer while the Debian jobs of the same
+    run succeeded). Retry a few times; client errors such as 404 are final so
+    a wrong URL still fails fast.
+    """
+    for attempt in range(ATTEMPTS):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as response:
+                return response.read()
+        except urllib.error.HTTPError as error:
+            if 400 <= error.code < 500:
+                raise
+            failure = error
+        except OSError as error:
+            failure = error
+        if attempt + 1 == ATTEMPTS:
+            raise failure
+        delay = 5 * (attempt + 1)
+        print(f'Download of {url} failed ({failure}); retrying in {delay}s', flush=True)
+        time.sleep(delay)
 
 
 def prepare(output, apply_patches=True, series=SERIES):
@@ -34,8 +63,11 @@ def prepare(output, apply_patches=True, series=SERIES):
     cache = ROOT / 'build/source-cache' / ('ffmpeg-' + record['upstream_version'] + '-source') / archive['filename']
     cache.parent.mkdir(parents=True, exist_ok=True)
     if not cache.exists():
-        with urllib.request.urlopen(url) as response:
-            cache.write_bytes(response.read())
+        # Write through a temporary file: an interrupted attempt must not leave
+        # a truncated archive that later looks like a checksum mismatch.
+        partial = cache.with_suffix(cache.suffix + '.part')
+        partial.write_bytes(download(url))
+        partial.replace(cache)
     if cache.stat().st_size != archive['size'] or sha(cache) != archive['sha256']:
         raise ValueError('FFmpeg upstream archive checksum mismatch')
     patches = []
