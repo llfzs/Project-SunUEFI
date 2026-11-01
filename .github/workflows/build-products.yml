@@ -137,7 +137,7 @@ jobs:
           if [ -f build/logs/ci-build.log ]; then
             tail -n 160 build/logs/ci-build.log
           fi
-          for log in build/distros/release.build.log build/ffmpeg/build.log build/gsd/build.log build/mutter/build.log; do
+          for log in build/distros/release.build.log build/ffmpeg/build.log build/gsd/build.log build/mutter/build.log build/gnome-shell/build.log; do
             if [ -f "$log" ]; then
               echo "::group::$log"
               tail -n 100 "$log"
@@ -237,6 +237,8 @@ jobs:
             build/mutter/SOURCE.json
             build/mutter/SHA256SUMS
             build/mutter/build.log
+            build/gnome-shell/SOURCE.json
+            build/gnome-shell/build.log
             build/distros/release/packages.tsv
             build/distros/release/adapters/manifest.json
             build/distros/release/runtime/manifest.json

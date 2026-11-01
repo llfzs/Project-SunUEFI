@@ -177,17 +177,35 @@ def collect(output, source, origin, jobs):
         shutil.copy2(path, runtime / path.name)
         packages[package] = {'file': path.name, 'version': PACKAGE_VERSION,
                              'architecture': architecture, 'sha256': debian.sha(path)}
-    # Inspect the actual package: the patched keyboard.js must carry the fix.
+    # Inspect the actual package: both patched hunks must survive into it.
+    # GNOME Shell 47 moved js/ into the "js-resources" GResource
+    # (js/js-resources.gresource.xml, prefix /org/gnome/shell, stored
+    # uncompressed) and meson links it into libshell-<api>.so and
+    # gnome-shell-perf-helper, so Debian 13 ships no
+    # /usr/share/gnome-shell/js/ui/keyboard.js at all. Search whatever the
+    # package really contains instead of a path that no longer exists.
+    markers = {'focus-open fix': b'inputMethod?.currentFocus',
+               'layout fallback': b'Invalid OSK layout: '}
+    shipped = dict.fromkeys(markers)
     with tempfile.TemporaryDirectory(prefix='gnome-shell-runtime-', dir=output) as temporary:
         folder = Path(temporary)
         shell_deb = runtime / f'gnome-shell_{PACKAGE_VERSION}_arm64.deb'
         debian.run(['dpkg-deb', '-x', shell_deb, folder])
-        keyboard = folder / 'usr/share/gnome-shell/js/ui/keyboard.js'
-        if not keyboard.is_file():
-            raise ValueError('Built gnome-shell package has no js/ui/keyboard.js')
-        text = keyboard.read_text(encoding='utf-8', errors='replace')
-        if 'inputMethod?.currentFocus' not in text:
-            raise ValueError('Built gnome-shell keyboard.js is missing the focus-open fix')
+        legacy = folder / 'usr/share/gnome-shell/js/ui/keyboard.js'
+        carriers = [legacy] if legacy.is_file() else sorted(
+            path for path in folder.rglob('*') if path.is_file())
+        if not carriers:
+            raise ValueError('Extracted gnome-shell package is empty')
+        for path in carriers:
+            data = path.read_bytes()
+            for label, marker in markers.items():
+                if shipped[label] is None and marker in data:
+                    shipped[label] = path.relative_to(folder).as_posix()
+            if all(shipped.values()):
+                break
+        missing = [label for label, carrier in shipped.items() if carrier is None]
+        if missing:
+            raise ValueError('Built gnome-shell package does not ship the ' + ', '.join(missing))
     changes = source.parent / f'gnome-shell_{PACKAGE_VERSION}_arm64.changes'
     buildinfo = source.parent / f'gnome-shell_{PACKAGE_VERSION}_arm64.buildinfo'
     change = next(row for row in debian.controls(changes.read_text()) if row.get('Source') == 'gnome-shell')
@@ -208,6 +226,7 @@ def collect(output, source, origin, jobs):
         'debian/rules', 'debian/control')}
     record = {'schema_version': 1, 'source': origin, 'packages_built': True,
               'patches': patch_records(), 'package_version': PACKAGE_VERSION,
+              'verified_in_package': shipped,
               'packages': packages, 'recipe': 'original Debian debian/rules and control',
               'build_command': ['dpkg-buildpackage', '-us', '-uc'],
               'build_options': 'nocheck parallel=' + str(jobs), 'build_profiles': 'nocheck',

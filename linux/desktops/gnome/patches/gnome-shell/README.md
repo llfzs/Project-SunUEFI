@@ -1,6 +1,9 @@
 # gnome-shell patches
 
-These patches change `js/ui/keyboard.js` of the running GNOME Shell.
+These patches change `js/ui/keyboard.js` of the running GNOME Shell. Since GNOME Shell 47
+that file is no longer installed on disk: it is compiled into the `js-resources` GResource
+linked into `libshell-<api>.so`, so verification has to look inside the binary (see the
+last section).
 
 ## Read this first: nothing in the image pipeline consumes this directory
 
@@ -89,8 +92,18 @@ patch --forward --fuzz=0 -Np1 -i ../0002-osk-purpose-layout-fallback.patch
 ```
 
 Either way, after installing, log out and back in (gnome-shell does not reload `js/`),
-then check the file really is patched:
+then check the patch really reached the binary.
+
+GNOME Shell 47 stopped installing `js/` as plain files. `js/js-resources.gresource.xml`
+is compiled into a GResource (prefix `/org/gnome/shell`, uncompressed) and meson links
+it into `libshell-<api>.so` and `gnome-shell-perf-helper`, so
+`/usr/share/gnome-shell/js/ui/keyboard.js` does not exist on Debian 13 at all — grepping
+for that path only proves the path is missing, not that the patch is:
 
 ```sh
-grep -n "inputMethod?.currentFocus" /usr/share/gnome-shell/js/ui/keyboard.js
+grep -al "inputMethod?.currentFocus" /usr/lib/*/gnome-shell/libshell-*.so
 ```
+
+Empty output means the running shell does not carry the fix. That is the same check
+`tools/build_gnome_shell_packages.py` runs on the built `.deb` (it records the carrier
+file as `verified_in_package` in `build/gnome-shell/SOURCE.json`).
