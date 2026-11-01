@@ -1,0 +1,18 @@
+# Line endings that must not depend on who checked the tree out.
+#
+# This repository is developed on Windows with core.autocrlf=true, so a plain
+# checkout rewrites text files to CRLF. That is harmless for sources, but fatal
+# for anything a device or the Linux build container runs, and for patches that
+# are applied as bytes:
+#   - a CRLF shebang makes systemd report "status 203/EXEC" on the tablet;
+#   - `git apply` / `patch` reject a CRLF patch file that was generated with LF.
+# Pin those to LF so the working tree matches the index.
+.gitattributes         text eol=lf
+*.sh                   text eol=lf
+*.py                   text eol=lf
+*.patch                text eol=lf
+*.diff                 text eol=lf
+build.sh               text eol=lf
+linux/userspace/**     text eol=lf
+linux/bsp/**           text eol=lf
+linux/configs/**       text eol=lf
