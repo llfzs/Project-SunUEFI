@@ -2,14 +2,18 @@
 # SPDX-License-Identifier: BSD-2-Clause-Patent
 # Switch the touch controller between pen scanning and finger-only input.
 #
-# Pen support keeps the controller in stylus scanning mode, which reports at
-# roughly 120 interrupts/s even when nothing touches the panel, and runs the
-# pen radio companion. Hosts without a pen can drop both by writing the marker
-# this tool manages; piano-touch-input decides on it at service start, so the
-# service has to be restarted for a change to take effect.
+# Finger-only is the default: images ship without the marker, so a freshly
+# flashed host never leaves the controller in stylus scanning mode (roughly
+# 120 interrupts/s even on an untouched panel) and never runs the pen radio
+# companion. Pen support is opt-in via `piano-pen-mode pen`.
+# piano-touch-input reads the marker at service start, so both actions restart
+# piano-touch.service.
 set -eu
 
-marker=/etc/piano/no-pen
+marker=/etc/piano/pen
+# Earlier images used an inverted "no pen" marker; remove it so a host carrying
+# both cannot disagree with itself.
+legacy=/etc/piano/no-pen
 
 usage() {
   echo "usage: piano-pen-mode [finger|pen|status]" >&2
@@ -18,9 +22,9 @@ usage() {
 
 state() {
   if [ -e "$marker" ]; then
-    echo finger
-  else
     echo pen
+  else
+    echo finger
   fi
 }
 
@@ -34,11 +38,13 @@ case "${1:-status}" in
       echo "piano-pen-mode: needs root, e.g. sudo piano-pen-mode $1" >&2
       exit 1
     fi
-    if [ "$1" = finger ]; then
+    if [ "$1" = pen ]; then
+      mkdir -p "${marker%/*}"
       touch "$marker"
     else
       rm -f "$marker"
     fi
+    rm -f "$legacy"
     ;;
   *)
     usage

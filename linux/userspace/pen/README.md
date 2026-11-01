@@ -81,11 +81,11 @@ P81C 的 137 字节 HID Report Map 将私有 Report5 数据放在键盘 Usage Pa
 
 `piano-touch-input` 在现有触控服务中启动 `pen-bluetooth --follow` 伴随进程。它只走 BlueZ，不读取 THP、也不生成键鼠输入；连接和 `ServicesResolved` 后完成初始化，断连后等待下一次连接重新发送反馈参数。磁吸状态只在开关存在时转发；没有磁吸／静止接口不阻塞已知的 BLE 功能。它支持当前笔返回的设备版本，不把 Modalias 硬锁到旧 `d0001`。`DA 01 01` 说明反馈设置被接收，物理震动仍需要轻捏确认。
 
-没有笔的主机可以放置 `/etc/piano/no-pen` 标记文件。存在时 `piano-touch-input` 把画笔扫描模式写 0、不启动 `pen-bluetooth` 伴随进程，也不向 `piano-touch-view` 传 `--pen-input`，只保留手指输入；删除标记并重启 `piano-touch.service` 即恢复。默认没有该文件，有笔主机的行为不变。
+笔支持在本板是 opt-in：镜像不带 `/etc/piano/pen` 标记，`piano-touch-input` 因此把画笔扫描模式写 0、不启动 `pen-bluetooth` 伴随进程，也不向 `piano-touch-view` 传 `--pen-input`，只保留手指输入。要用手写笔时执行 `sudo piano-pen-mode pen`（建标记并重启服务），`sudo piano-pen-mode finger` 退回。
 
 这个开关直接对应空闲功耗。带笔支持时控制器按 8.3 ms 周期上报，面板上什么都没有也会产生约 120 次/秒中断。目标机上关闭前后的同机对照：触控中断 120/s → 0/s，`arch_timer` 1694/s → 97/s，`Function call` IPI 1546/s → 59/s，`gpu-irq` 251/s → 0/s，`piano-touch-view` 5% CPU → 0%，load average 1.19 → 0.05。中断本身不耗多少电，但它们持续把 CPU 拉出 idle，连带触发定时器重编程、IPI 广播和合成器重绘。
 
-`pen-bluetooth` 的周期性重连尝试属于另一条路径，标记文件会把它一并停掉。
+`pen-bluetooth` 的周期性重连尝试属于另一条路径。默认不建标记时它根本不会被启动，重连尝试随之消失。
 
 断连时，伴随进程从 BlueZ 枚举已开启的适配器，尝试连接已配对、受信任的 P81C。SC96231 内核驱动从磁吸链路提供笔的准确地址后，程序优先使用该地址；BlueZ 报告认证失败时，只清除这支笔失效的配对并通过标准 Agent1／Device1 接口重新配对。配对代理不成为系统默认代理，不接受其他设备。原厂 Android 与 Linux 交替使用后，已完成自动删除旧配对、重新配对、恢复 GATT 控制服务和初始化。
 
@@ -95,25 +95,27 @@ P81C 的 137 字节 HID Report Map 将私有 Report5 数据放在键盘 Usage Pa
 
 笔尖位置、压力和悬停仍通过标准 tablet-tool 接口输出。光标外观由桌面和应用决定，不能靠把笔伪装成触摸屏解决。`piano-pen-canvas` 在自己的画布内对笔事件使用隐藏光标，鼠标／触控板事件恢复普通光标，画布之外不改桌面全局设置。其他应用的笔光标遵循各自设置。
 
-## 没有触控笔的主机
+## 笔支持默认关闭（opt-in）
 
-笔支持让触控控制器一直留在 stylus 扫描模式，即使空面板也按约 120 次/秒上报，并常驻一个 `pen-bluetooth` 进程。没有笔的主机可以只保留手指输入，判据是 `/etc/piano/no-pen` 这个标记文件：存在时 `touch-input` 先 `echo 0 > /proc/nvt_thp_stylus` 关掉笔扫描，不启动 `pen-bluetooth`，也不给 `piano-touch-view` 传 `--pen-ini`／`--pen-input`。
+笔支持让触控控制器一直留在 stylus 扫描模式，即使空面板也按约 120 次/秒上报，并常驻一个 `pen-bluetooth` 进程。所以本板的默认是**关闭**：`piano-touch-input` 只在 `/etc/piano/pen` 存在时才走笔路径，否则先 `echo 0 > /proc/nvt_thp_stylus` 关掉笔扫描，只执行 `piano-touch-view input --seconds 0`。镜像不预置这个标记，**刷机后默认就是手指模式，不需要再手动关一次**。
 
-标记由 `piano-pen-mode` 管理，不用手写文件：
+要用手写笔的机器执行一次：
 
 ```sh
-sudo piano-pen-mode finger   # 关掉笔扫描，只留手指
-sudo piano-pen-mode pen      # 恢复笔支持
+sudo piano-pen-mode pen      # 建标记、重启服务，进入笔模式
+sudo piano-pen-mode finger   # 删标记、重启服务，回到手指输入
 piano-pen-mode status        # 当前模式，读的就是标记文件
 ```
 
-两个切换动作都会重启 `piano-touch.service`——`touch-input` 只在服务启动时读一次标记，不重启不会生效。标记不属于任何包，**刷机后一定丢失**，刷完新镜像要重新执行一次 `sudo piano-pen-mode finger`。
+两个动作都会重启 `piano-touch.service`——`touch-input` 只在服务启动时读一次标记，不重启不会生效。标记在 `/etc` 下、不属于任何包，刷机后自然消失。
 
-比标记更容易漏的是脚本本身：`/usr/lib/piano/touch-input` 必须是带这个分支的版本（1717 字节；更早的 1316 字节版本没有判断，建了标记也不会生效）。刷到旧镜像时先把仓库里的两个文件装上去，注意保持 LF，CRLF 的 shebang 会让服务报 `status 203/EXEC`：
+早期镜像用的是反向标记 `/etc/piano/no-pen`（存在=关笔）。`piano-pen-mode` 在 `pen` 和 `finger` 两个分支都会删掉它，避免两个标记互相矛盾。
+
+比标记更容易漏的是脚本本身：`/usr/lib/piano/touch-input` 必须是带这个分支的版本（判据：`grep -q 'etc/piano/pen'`，命中才是新版；1316 字节的更早版本连反向标记都没有）。刷到旧镜像时先把仓库里的两个文件装上去，注意保持 LF，CRLF 的 shebang 会让服务报 `status 203/EXEC`：
 
 ```sh
 scp linux/userspace/pen/piano-touch-input linux/userspace/pen/piano-pen-mode piano@HOST:/tmp/
-ssh piano@HOST 'sudo cp -a /usr/lib/piano/touch-input /usr/lib/piano/touch-input.orig-nopen &&
+ssh piano@HOST 'sudo cp -a /usr/lib/piano/touch-input /usr/lib/piano/touch-input.orig &&
                 sudo install -o root -g root -m 755 /tmp/piano-touch-input /usr/lib/piano/touch-input &&
                 sudo install -o root -g root -m 755 /tmp/piano-pen-mode /usr/bin/piano-pen-mode &&
                 sudo piano-pen-mode finger'

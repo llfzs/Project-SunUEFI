@@ -4,9 +4,10 @@
 set -eu
 # Pen support keeps the controller in stylus scanning mode, which reports at
 # roughly 120 interrupts/s even when nothing touches the panel, and runs the
-# pen radio companion. Hosts without a pen can opt out with this marker file
-# and keep finger input only.
-if [ -e /etc/piano/no-pen ]; then
+# pen radio companion. It is opt-in on this board: without /etc/piano/pen the
+# reader stays finger-only, so a freshly flashed image never pays that idle
+# cost for a pen that may not be there. Enable it with `piano-pen-mode pen`.
+if [ ! -e /etc/piano/pen ]; then
   echo 0 > /proc/nvt_thp_stylus 2>/dev/null || true
   exec /usr/bin/piano-touch-view input --seconds 0
 fi
