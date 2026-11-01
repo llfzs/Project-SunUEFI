@@ -1,0 +1,56 @@
+#!/bin/sh
+# SPDX-License-Identifier: BSD-2-Clause-Patent
+# Switch the touch controller between pen scanning and finger-only input.
+#
+# Pen support keeps the controller in stylus scanning mode, which reports at
+# roughly 120 interrupts/s even when nothing touches the panel, and runs the
+# pen radio companion. Hosts without a pen can drop both by writing the marker
+# this tool manages; piano-touch-input decides on it at service start, so the
+# service has to be restarted for a change to take effect.
+set -eu
+
+marker=/etc/piano/no-pen
+
+usage() {
+  echo "usage: piano-pen-mode [finger|pen|status]" >&2
+  exit 2
+}
+
+state() {
+  if [ -e "$marker" ]; then
+    echo finger
+  else
+    echo pen
+  fi
+}
+
+case "${1:-status}" in
+  status)
+    state
+    exit 0
+    ;;
+  finger|pen)
+    if [ "$(id -u)" -ne 0 ]; then
+      echo "piano-pen-mode: needs root, e.g. sudo piano-pen-mode $1" >&2
+      exit 1
+    fi
+    if [ "$1" = finger ]; then
+      touch "$marker"
+    else
+      rm -f "$marker"
+    fi
+    ;;
+  *)
+    usage
+    ;;
+esac
+
+if ! systemctl restart piano-touch.service; then
+  echo "piano-pen-mode: piano-touch.service failed to restart" >&2
+  exit 1
+fi
+
+# The service writes /proc/nvt_thp_stylus and execs the reader right after
+# start, so give it a moment before reporting what it actually landed on.
+sleep 1
+echo "piano-pen-mode: $(state) mode, piano-touch.service $(systemctl is-active piano-touch.service 2>/dev/null || echo unknown)"

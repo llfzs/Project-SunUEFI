@@ -99,20 +99,24 @@ P81C 的 137 字节 HID Report Map 将私有 Report5 数据放在键盘 Usage Pa
 
 笔支持让触控控制器一直留在 stylus 扫描模式，即使空面板也按约 120 次/秒上报，并常驻一个 `pen-bluetooth` 进程。没有笔的主机可以只保留手指输入，判据是 `/etc/piano/no-pen` 这个标记文件：存在时 `touch-input` 先 `echo 0 > /proc/nvt_thp_stylus` 关掉笔扫描，不启动 `pen-bluetooth`，也不给 `piano-touch-view` 传 `--pen-ini`／`--pen-input`。
 
-标记文件不属于任何包，刷机后一定丢失，需要重建：
+标记由 `piano-pen-mode` 管理，不用手写文件：
 
 ```sh
-sudo touch /etc/piano/no-pen
-sudo systemctl restart piano-touch.service
+sudo piano-pen-mode finger   # 关掉笔扫描，只留手指
+sudo piano-pen-mode pen      # 恢复笔支持
+piano-pen-mode status        # 当前模式，读的就是标记文件
 ```
 
-只有标记还不够：`/usr/lib/piano/touch-input` 必须是带这个分支的版本（1717 字节；更早的 1316 字节版本没有判断，建了标记也不会生效）。刷到旧镜像时先把仓库里的脚本装上去，注意保持 LF，CRLF 的 shebang 会让服务报 `status 203/EXEC`：
+两个切换动作都会重启 `piano-touch.service`——`touch-input` 只在服务启动时读一次标记，不重启不会生效。标记不属于任何包，**刷机后一定丢失**，刷完新镜像要重新执行一次 `sudo piano-pen-mode finger`。
+
+比标记更容易漏的是脚本本身：`/usr/lib/piano/touch-input` 必须是带这个分支的版本（1717 字节；更早的 1316 字节版本没有判断，建了标记也不会生效）。刷到旧镜像时先把仓库里的两个文件装上去，注意保持 LF，CRLF 的 shebang 会让服务报 `status 203/EXEC`：
 
 ```sh
-scp linux/userspace/pen/piano-touch-input piano@HOST:/tmp/
+scp linux/userspace/pen/piano-touch-input linux/userspace/pen/piano-pen-mode piano@HOST:/tmp/
 ssh piano@HOST 'sudo cp -a /usr/lib/piano/touch-input /usr/lib/piano/touch-input.orig-nopen &&
                 sudo install -o root -g root -m 755 /tmp/piano-touch-input /usr/lib/piano/touch-input &&
-                sudo systemctl restart piano-touch.service'
+                sudo install -o root -g root -m 755 /tmp/piano-pen-mode /usr/bin/piano-pen-mode &&
+                sudo piano-pen-mode finger'
 ```
 
 验证（前两项是进程参数，第三项要 5 秒内不增长）：
@@ -127,7 +131,7 @@ grep NVT-ts-spi /proc/interrupts         # 计数不再增长
 
 ## 构建与校准打包入口
 
-`tools/build_release_helpers.py` 与 `tools/build_piano_runtime_helpers.py` 已共用 `build_pen_core()`，从源码副本调用这里的 Makefile。默认 native runtime bundle 包含 `/usr/bin/piano-pen-offline`、`/usr/bin/piano-pen-canvas`、`/usr/lib/piano/pen-bluetooth`，以及 Apache-2.0 许可和来源说明。编译清单记录 C／C++ 源码、头文件、Makefile、工具链和目标静态 C++ 库；离线工具是 ARM64 静态程序，构建不需要原厂 ini。
+`tools/build_release_helpers.py` 与 `tools/build_piano_runtime_helpers.py` 已共用 `build_pen_core()`，从源码副本调用这里的 Makefile。默认 native runtime bundle 包含 `/usr/bin/piano-pen-offline`、`/usr/bin/piano-pen-canvas`、`/usr/bin/piano-pen-mode`、`/usr/lib/piano/pen-bluetooth`，以及 Apache-2.0 许可和来源说明。编译清单记录 C／C++ 源码、头文件、Makefile、工具链和目标静态 C++ 库；离线工具是 ARM64 静态程序，构建不需要原厂 ini。
 
 `libpiano-pen-core.a` 包含 C 编译的 owner／frame 与 C++ 编译的 core／decoder，已经静态链接到正常构建的 `piano-touch-view`，库文件本身不安装进系统。触控源码和入口包装保留 C ABI，最终链接使用同一目标 sysroot 的 C++ 链接器。rootfs 通过现有 `runtime.stage()` 安装程序并保留补丁、owner 和核心源码的来源记录。
 
