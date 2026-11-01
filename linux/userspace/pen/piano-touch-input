@@ -2,6 +2,14 @@
 # SPDX-License-Identifier: BSD-2-Clause-Patent
 # One THP reader; select calibration using the actual touch controller LCD ID.
 set -eu
+# Pen support keeps the controller in stylus scanning mode, which reports at
+# roughly 120 interrupts/s even when nothing touches the panel, and runs the
+# pen radio companion. Hosts without a pen can opt out with this marker file
+# and keep finger input only.
+if [ -e /etc/piano/no-pen ]; then
+  echo 0 > /proc/nvt_thp_stylus 2>/dev/null || true
+  exec /usr/bin/piano-touch-view input --seconds 0
+fi
 # This companion shares piano-touch.service's process group. It does not read
 # THP data or emit input; it restores actual pen radio/haptic settings after
 # BlueZ reconnects. systemd stops it together with the touch owner.
