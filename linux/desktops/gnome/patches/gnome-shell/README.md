@@ -29,7 +29,7 @@ patched `gnome-shell`/`gnome-shell-common` packages (mirroring `build_mutter_pac
 and `tools/build_release_rootfs.py` installs them into the release rootfs when
 `desktop == 'gnome'`. There is still no Arch/Nyarch `PKGBUILD` for gnome-shell
 (compare `linux/desktops/gnome/arch/mutter/PKGBUILD`); Nyarch builds still need a PKGBUILD
-that applies these two patches, or a manual `apt-get source gnome-shell` rebuild as below.
+that applies these three patches, or a manual `apt-get source gnome-shell` rebuild as below.
 
 ## Patches here
 
@@ -43,13 +43,27 @@ that applies these two patches, or a manual `apt-get source gnome-shell` rebuild
 - `0002-osk-purpose-layout-fallback.patch` — defensive. The reported symptom is not
   caused by it (the phone layout renders fine), but the purpose branch of `_updateLayout()`
   really had no try/catch and no fallback while the password branch did.
-  It replaces the old `0001-osk-purpose-layout-fallback.patch`, which must be deleted so
-  the directory does not keep two unreferenced copies of the same patch.
+  It replaces the old `0001-osk-purpose-layout-fallback.patch` — a zero-byte duplicate
+  that has since been deleted so the directory does not keep two copies of one patch.
+- `0003-osk-missing-level-guard.patch` — the empty-keyboard fix. `_setActiveLevel()`
+  assigns `layers[activeLevel]` to `_currentPage` without checking the layer exists, and
+  the purpose layouts have exactly one level (`phone.json` defines `default`, no `shift`).
+  A stale `shift` request therefore sets `_currentPage` to `undefined`; the `connect()`
+  on the next line throws, `_updateCurrentPageVisible()` never runs, and since
+  `_updateLayout()` hides every layer it builds, the keyboard is open but shows **no keys
+  at all**. That is what a phone-number field in a browser produced: 102 consecutive
+  `TypeError: this._currentPage is undefined` lines in the journal between 13:49 and
+  13:53. The patch also drops the pending `surrounding-text-set` request when the layout
+  changes (the handler outlives the layout it was registered for) and guards
+  `maybeHandleEvent()` against a null event actor.
 
-Both are written against the `gnome-48` branch of GNOME Shell (the Debian 13 source is
-`gnome-shell 48.7-0+deb13u2`). Verified by applying them in order to a pristine
-`js/ui/keyboard.js` with `patch --forward --fuzz=0 -p1` — clean, no offsets on the first
-hunk of each — and `node --check` on the result.
+All three are written against the `gnome-48` branch of GNOME Shell (the Debian 13 source is
+`gnome-shell 48.7-0+deb13u2`). 0001 and 0002 were verified by applying them in order to a
+pristine `js/ui/keyboard.js` with `patch --forward --fuzz=0 -p1` — clean, no offsets on the
+first hunk of each — and `node --check` on the result. 0003 was verified the same way on
+top of the tree 0001+0002 produce (the exact file the shipped `48.7-0+deb13u2+sunuefi1`
+package carries, extracted from `libshell-16.so`): all five hunks apply with `--fuzz=0`,
+no rejects, and the result passes `node --check`.
 
 ## Confirm the diagnosis without rebuilding anything
 
@@ -74,7 +88,7 @@ sudo libinput debug-events   # do not touch the screen, watch for events on thei
 sudo apt-get source gnome-shell
 cd gnome-shell-48.*
 cp ../../linux/desktops/gnome/patches/gnome-shell/000*.patch debian/patches/
-printf '0001-keyboard-open-on-enable-while-focused.patch\n0002-osk-purpose-layout-fallback.patch\n' >> debian/patches/series
+printf '0001-keyboard-open-on-enable-while-focused.patch\n0002-osk-purpose-layout-fallback.patch\n0003-osk-missing-level-guard.patch\n' >> debian/patches/series
 sudo apt-get build-dep gnome-shell
 dpkg-buildpackage -us -uc -b
 sudo apt install ../gnome-shell_*.deb
@@ -83,12 +97,13 @@ sudo apt-mark hold gnome-shell   # otherwise the next upgrade silently drops the
 
 ## Arch / Nyarch
 
-Follow `linux/desktops/gnome/arch/mutter/PKGBUILD` as the shape: add both patches to
+Follow `linux/desktops/gnome/arch/mutter/PKGBUILD` as the shape: add all three patches to
 `source=()` and, in `prepare()`,
 
 ```sh
 patch --forward --fuzz=0 -Np1 -i ../0001-keyboard-open-on-enable-while-focused.patch
 patch --forward --fuzz=0 -Np1 -i ../0002-osk-purpose-layout-fallback.patch
+patch --forward --fuzz=0 -Np1 -i ../0003-osk-missing-level-guard.patch
 ```
 
 Either way, after installing, log out and back in (gnome-shell does not reload `js/`),
@@ -101,9 +116,14 @@ it into `libshell-<api>.so` and `gnome-shell-perf-helper`, so
 for that path only proves the path is missing, not that the patch is:
 
 ```sh
-grep -al "inputMethod?.currentFocus" /usr/lib/*/gnome-shell/libshell-*.so
+grep -al "inputMethod?.currentFocus" \
+    /usr/lib/gnome-shell/libshell-*.so /usr/lib/*/gnome-shell/libshell-*.so 2>/dev/null
 ```
 
-Empty output means the running shell does not carry the fix. That is the same check
+Note the two paths: Debian 13 arm64 installs the library as
+`/usr/lib/gnome-shell/libshell-16.so`, **without** a multiarch directory, so the
+`/usr/lib/*/` form alone matches nothing and looks like a missing patch. Empty output from
+both means the running shell does not carry the fix. That is the same check
 `tools/build_gnome_shell_packages.py` runs on the built `.deb` (it records the carrier
-file as `verified_in_package` in `build/gnome-shell/SOURCE.json`).
+file as `verified_in_package` in `build/gnome-shell/SOURCE.json`), extended with a third
+marker — `_clearSurroundingTextRequest` — for patch 0003.

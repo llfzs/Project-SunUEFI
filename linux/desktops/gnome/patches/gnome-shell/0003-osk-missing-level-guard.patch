@@ -1,0 +1,97 @@
+From: slwyts <slwyts@foxmail.com>
+Subject: [PATCH] ui/keyboard: keep the OSK populated when a level is missing
+
+Three related defects, all reachable from a page that moves focus between a
+normal text field and a tel/number field -- a phone-number login form in a
+browser is the reported case.
+
+1. _setActiveLevel() assigns layers[activeLevel] to _currentPage without
+   checking that the layer exists. Purpose-specific layouts have a single
+   level (phone.json only defines 'default'), so a stale 'shift' request sets
+   _currentPage to undefined and the connect() right after it throws. That
+   skips _updateCurrentPageVisible(), and since _updateLayout() hides every
+   layer it built, the keyboard stays open while showing no keys at all.
+2. _updateLevelFromHints() resolves the requested level asynchronously via
+   'surrounding-text-set'. The handler outlives the layout it was registered
+   for, so focusing a tel field afterwards asks for 'shift' in a layout that
+   has no shift layer. Drop the pending request when the layout changes.
+3. maybeHandleEvent() passes global.stage.get_event_actor() straight into
+   keyboardBox.contains(), which throws "Argument descendant may not be null"
+   whenever the event has no actor.
+
+On Debian 13 arm64 this surfaced as 102 consecutive
+"TypeError: this._currentPage is undefined" lines in the journal while a
+phone number was being typed, with a keyboard that had no visible keys.
+
+Applies to upstream GNOME Shell 48.7 (gnome-48 branch).
+Debian 13 source: gnome-shell 48.7-0+deb13u2.
+Origin: https://gitlab.gnome.org/GNOME/gnome-shell/-/blob/gnome-48/js/ui/keyboard.js
+Forwarded: no
+---
+--- a/js/ui/keyboard.js
++++ b/js/ui/keyboard.js
+@@ -1180,6 +1180,9 @@
+ 
+         const actor = global.stage.get_event_actor(event);
+ 
++        if (!actor)
++            return false;
++
+         if (Main.layoutManager.keyboardBox.contains(actor) ||
+             !!actor._extendedKeys || !!actor.extendedKey) {
+             actor.event(event, true);
+@@ -1384,8 +1387,7 @@
+                             this._setActiveLevel('default');
+                     }
+ 
+-                    Main.inputMethod.disconnect(this._surroundingTextId);
+-                    this._surroundingTextId = 0;
++                    this._clearSurroundingTextRequest();
+                 });
+             Main.inputMethod.request_surrounding();
+             return;
+@@ -1395,6 +1397,14 @@
+             this._setActiveLevel('default');
+     }
+ 
++    _clearSurroundingTextRequest() {
++        if (!this._surroundingTextId)
++            return;
++
++        Main.inputMethod.disconnect(this._surroundingTextId);
++        this._surroundingTextId = 0;
++    }
++
+     _onKeyFocusChanged() {
+         let focus = global.stage.key_focus;
+ 
+@@ -1421,6 +1431,13 @@
+     }
+ 
+     _updateLayout(groupName, purpose) {
++        // Hints-driven level changes are asynchronous: _updateLevelFromHints()
++        // registers a surrounding-text handler and the level it asks for is only
++        // resolved later, against whatever layout is current by then. Drop any
++        // pending request first -- the level it wants may not exist in the new
++        // layout (phone.json defines a single 'default' level, no 'shift').
++        this._clearSurroundingTextRequest();
++
+         let keyboardModel = null;
+         let layers = {};
+         let layout = new Clutter.Actor({
+@@ -1706,6 +1723,15 @@
+         const layers = this._layers;
+         let currentPage = layers[activeLevel];
+ 
++        // The requested level is not part of the layout that is currently in
++        // use. The purpose-specific layouts are the usual case: phone.json
++        // only defines 'default', so any stale 'shift' request lands here.
++        // Bail out before assigning undefined to _currentPage -- the connect()
++        // below would throw, skipping _updateCurrentPageVisible(), and every
++        // layer stays hidden: the keyboard is open but shows no keys at all.
++        if (!currentPage)
++            return;
++
+         if (this._currentPage === currentPage) {
+             this._updateCurrentPageVisible();
+             return;

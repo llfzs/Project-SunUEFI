@@ -2,7 +2,7 @@
 """Build the fixed Debian ARM64 GNOME Shell source with standard quilt/debhelper.
 
 Mirrors tools/build_mutter_packages.py: it clones a completed trixie ARM64
-sysroot, drops the two on-screen-keyboard patches into debian/patches/series,
+sysroot, drops the three on-screen-keyboard patches into debian/patches/series,
 and rebuilds the gnome-shell packages with dpkg-buildpackage. The result lands
 in build/gnome-shell/runtime and is consumed by tools/build_release_rootfs.py
 when desktop == 'gnome', so the fix actually reaches the tablet image.
@@ -32,12 +32,14 @@ ROOT = Path(__file__).resolve().parents[1]
 # when trixie ships a different revision; the build verifies against the authenticated
 # APT source index, so a mismatch fails loudly instead of silently building the wrong tree.
 SOURCE_VERSION = '48.7-0+deb13u2'
-PACKAGE_VERSION = SOURCE_VERSION + '+sunuefi1'
-# Only the two intended patches. The stale 0001-osk-purpose-layout-fallback.patch that
-# the round-two README said to delete is intentionally NOT listed here.
+PACKAGE_VERSION = SOURCE_VERSION + '+sunuefi2'
+# Only the intended patches, in series order: 0003 is written against the tree 0001
+# and 0002 already produce. The zero-byte 0001-osk-purpose-layout-fallback.patch that
+# used to sit in that directory has been deleted; nothing ever referenced it.
 PATCHES = [ROOT / 'linux/desktops/gnome/patches/gnome-shell' / name for name in (
     '0001-keyboard-open-on-enable-while-focused.patch',
-    '0002-osk-purpose-layout-fallback.patch')]
+    '0002-osk-purpose-layout-fallback.patch',
+    '0003-osk-missing-level-guard.patch')]
 RUNTIME = {'gnome-shell': 'arm64', 'gnome-shell-common': 'all'}
 
 
@@ -177,7 +179,7 @@ def collect(output, source, origin, jobs):
         shutil.copy2(path, runtime / path.name)
         packages[package] = {'file': path.name, 'version': PACKAGE_VERSION,
                              'architecture': architecture, 'sha256': debian.sha(path)}
-    # Inspect the actual package: both patched hunks must survive into it.
+    # Inspect the actual package: every patched hunk must survive into it.
     # GNOME Shell 47 moved js/ into the "js-resources" GResource
     # (js/js-resources.gresource.xml, prefix /org/gnome/shell, stored
     # uncompressed) and meson links it into libshell-<api>.so and
@@ -185,7 +187,8 @@ def collect(output, source, origin, jobs):
     # /usr/share/gnome-shell/js/ui/keyboard.js at all. Search whatever the
     # package really contains instead of a path that no longer exists.
     markers = {'focus-open fix': b'inputMethod?.currentFocus',
-               'layout fallback': b'Invalid OSK layout: '}
+               'layout fallback': b'Invalid OSK layout: ',
+               'missing level guard': b'_clearSurroundingTextRequest'}
     shipped = dict.fromkeys(markers)
     with tempfile.TemporaryDirectory(prefix='gnome-shell-runtime-', dir=output) as temporary:
         folder = Path(temporary)
@@ -244,7 +247,7 @@ def collect(output, source, origin, jobs):
 def build(output, sysroot, builder_root, jobs, install_dependencies, source_version):
     global SOURCE_VERSION, PACKAGE_VERSION
     SOURCE_VERSION = source_version
-    PACKAGE_VERSION = SOURCE_VERSION + '+sunuefi1'
+    PACKAGE_VERSION = SOURCE_VERSION + '+sunuefi2'
     output = output.resolve()
     if not output.is_relative_to(ROOT / 'build') or not 1 <= jobs <= 8:
         raise ValueError('Use a project build output and 1..8 jobs')
