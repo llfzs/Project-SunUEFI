@@ -1,0 +1,12 @@
+[Unit]
+Description=Piano sensor proxy power saving
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/lib/piano/sensor-power watch
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

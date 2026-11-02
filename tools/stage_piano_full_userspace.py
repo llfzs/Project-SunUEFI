@@ -15,6 +15,10 @@ from build_piano_ram_bootstrap import guest_resolve
 
 ROOT=Path(__file__).resolve().parents[1]
 EXPECTED='a75f8c5d5fa099d65c171ac839c2e3bb6c63ec45'
+# Overlay files that are executed rather than read. Everything else is 0644.
+EXECUTABLES=frozenset({'usr/lib/piano/power-button', 'usr/lib/piano/sensor-power'})
+# User units the graphical session starts on login.
+USER_UNITS=('piano-power-button.service', 'piano-sensor-power.service')
 
 
 def stage_gnome_power(rootfs):
@@ -33,7 +37,7 @@ def stage_gnome_power(rootfs):
         destination = guest_resolve(rootfs, relative.as_posix())
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
-        destination.chmod(0o755 if relative.as_posix() == 'usr/lib/piano/power-button' else 0o644)
+        destination.chmod(0o755 if relative.as_posix() in EXECUTABLES else 0o644)
         copied[destination.relative_to(rootfs).as_posix()] = hashlib.sha256(source.read_bytes()).hexdigest()
     # Use the same GNOME defaults as the multi-distro assembler. In particular,
     # the public schema override disables animation; local dconf takes priority.
@@ -52,10 +56,11 @@ def stage_gnome_power(rootfs):
            if parent != rootfs and parent.is_relative_to(rootfs)):
         raise ValueError('Guest symlink in GNOME user service directory')
     wants.mkdir(parents=True, exist_ok=True)
-    link = wants / 'piano-power-button.service'
-    if link.exists() or link.is_symlink():
-        link.unlink()
-    link.symlink_to('/usr/lib/systemd/user/piano-power-button.service')
+    for unit in USER_UNITS:
+        link = wants / unit
+        if link.exists() or link.is_symlink():
+            link.unlink()
+        link.symlink_to('/usr/lib/systemd/user/' + unit)
     # Remove the base image's old sleep masks. GNOME requests standard
     # memory suspend; disk hibernation remains disabled by sleep.conf.
     for unit in ('sleep.target', 'suspend.target'):

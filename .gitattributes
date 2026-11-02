@@ -14,5 +14,6 @@
 *.diff                 text eol=lf
 build.sh               text eol=lf
 linux/userspace/**     text eol=lf
+linux/desktops/**      text eol=lf
 linux/bsp/**           text eol=lf
 linux/configs/**       text eol=lf

@@ -122,3 +122,37 @@ GNOME 的 DBus 订阅包括 gnome-shell、gsd-power 和 gsd-media-keys，`ambien
 systemctl status piano-adsp piano-sensors-import adsprpcd-sensorspd iio-sensor-proxy
 journalctl -b -u piano-adsp -u piano-sensors-import -u adsprpcd-sensorspd -u iio-sensor-proxy
 ```
+
+## 空闲时停掉传感器代理（piano-sensor-power）
+
+`iio-sensor-proxy` 通过 sensors PD 持续拉加速度和光线数据，即使没有客户端在听，
+也让运行队列每秒醒约 25 次。锁屏、关掉自动旋转、关掉自动亮度时这些数据没有用处。
+
+`/usr/lib/piano/sensor-power` 是 `piano-sensor-power.service`（graphical-session
+用户单元）的入口，按两个 GNOME 设置启停 `iio-sensor-proxy.service`：
+
+| 设置 | 值 | 传感器代理 |
+| --- | --- | --- |
+| `…peripherals.touchscreen orientation-lock` | `false`（允许屏幕旋转） | 运行 |
+| `…plugins.power ambient-enabled` | `true`（自动亮度） | 运行 |
+| 两者都不需要 | | 停止 |
+
+设置变化由 `gsettings monitor` 触发重新判断，`sync` 供登录时启动同步一次，
+`status` 打印判定结果。设置读不到时按“需要”处理，宁可多跑也不误停。
+
+`systemctl stop` 总线激活单元后，它的 D-Bus 名字不再注册，外部进程也不会把它
+悄悄拉起来；`systemctl start` 之后 Mutter 和 gsd-power 会重新 claim。用户单元需要
+停系统单元，因此附带 `/usr/share/polkit-1/rules.d/60-piano-sensor-power.rules`，
+只授权本地活动会话管理这一个单元。
+
+实测（2026-11-02，`7.3.0-piano-sunuefi-cachy`，锁屏、屏幕关闭、旋转锁已开）：
+停掉后全局上下文切换从 428 次/秒降到约 300 次/秒，`iio-sensor-prox` 进程消失；
+**功耗没有变化**（0.68 W → 0.68 W），这个量级低于电量计 4.2 mW 的分辨率。同一组
+实测里把两个 CPU cluster 的 `scaling_max_freq` 锁到最低频，功耗也只从 0.68 W 变成
+0.65–0.67 W。空闲功耗的主体是系统不进入挂起，与频率和这些唤醒无关。
+
+```sh
+systemctl --user status piano-sensor-power
+/usr/lib/piano/sensor-power status
+```
+

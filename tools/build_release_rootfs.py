@@ -182,8 +182,14 @@ def default_system_record(rootfs, installed, config, desktop='gnome'):
         'usr/lib/piano/touch-input', 'usr/bin/piano-pen-canvas',
         'usr/bin/piano-pen-mode',
     )
-    paths += (('etc/dconf/db/local.d/00-sunuefi', 'etc/dconf/db/local', 'etc/dconf/profile/user')
-              if desktop == 'gnome' else ('etc/sddm.conf.d/10-sunuefi.conf',))
+    if desktop == 'gnome':
+        paths += ('etc/dconf/db/local.d/00-sunuefi', 'etc/dconf/db/local', 'etc/dconf/profile/user',
+                  'usr/lib/piano/sensor-power',
+                  'usr/lib/systemd/user/piano-sensor-power.service',
+                  'etc/systemd/user/graphical-session.target.wants/piano-sensor-power.service',
+                  'usr/share/polkit-1/rules.d/60-piano-sensor-power.rules')
+    else:
+        paths += ('etc/sddm.conf.d/10-sunuefi.conf',)
     files = {}
     for name in paths:
         path = userspace.guest_resolve(rootfs, name)

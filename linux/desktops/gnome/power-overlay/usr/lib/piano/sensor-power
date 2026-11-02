@@ -1,0 +1,78 @@
+#!/bin/sh
+# SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+# iio-sensor-proxy drives the SSC accelerometer and light sensor through the
+# sensors PD. On this tablet it wakes the CPU about 25 times a second even when
+# nothing is listening, which is pure loss while the screen is locked.
+#
+# Only two GNOME settings consume those sensors:
+#   * org.gnome.settings-daemon.peripherals.touchscreen orientation-lock
+#     (false = auto-rotate on, the accelerometer is needed)
+#   * org.gnome.settings-daemon.plugins.power ambient-enabled
+#     (true = automatic brightness, the light sensor is needed)
+# The proxy is stopped while neither asks for it and started again as soon as
+# one does. It is D-Bus activated, so starting it here is enough for Mutter and
+# gsd-power to claim their sensors again.
+set -eu
+
+unit=iio-sensor-proxy.service
+touchscreen=org.gnome.settings-daemon.peripherals.touchscreen
+power=org.gnome.settings-daemon.plugins.power
+
+usage() {
+    echo "usage: sensor-power sync|watch|status" >&2
+    exit 2
+}
+
+setting() {
+    gsettings get "$1" "$2" 2>/dev/null || echo unknown
+}
+
+needed() {
+    # An unreadable setting means the schema or dconf is unavailable. Keep the
+    # sensor stack exactly as shipped instead of guessing that it is unused.
+    case "$(setting "$touchscreen" orientation-lock)" in
+        false) return 0 ;;
+        true) ;;
+        *) return 0 ;;
+    esac
+    case "$(setting "$power" ambient-enabled)" in
+        true) return 0 ;;
+    esac
+    return 1
+}
+
+apply() {
+    if needed; then
+        systemctl start "$unit" 2>/dev/null || true
+    else
+        systemctl stop "$unit" 2>/dev/null || true
+    fi
+}
+
+watch() {
+    apply
+    # gsettings monitor reports every key of a schema, and the two settings we
+    # care about live in different schemas, so watch both.
+    gsettings monitor "$touchscreen" | while read -r _; do apply; done &
+    gsettings monitor "$power" | while read -r _; do apply; done &
+    wait
+}
+
+status() {
+    printf 'orientation-lock=%s\n' "$(setting "$touchscreen" orientation-lock)"
+    printf 'ambient-enabled=%s\n' "$(setting "$power" ambient-enabled)"
+    if needed; then
+        printf 'sensor-needed=yes\n'
+    else
+        printf 'sensor-needed=no\n'
+    fi
+    printf '%s=%s\n' "$unit" "$(systemctl is-active "$unit" 2>/dev/null || true)"
+}
+
+case "${1:-}" in
+    sync) apply ;;
+    watch) watch ;;
+    status) status ;;
+    *) usage ;;
+esac
