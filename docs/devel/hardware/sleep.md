@@ -47,3 +47,48 @@ GNOME 标准实现通过 ScreenShield 的 `WakeUpScreen` 通知电源组件
 临时退出空闲状态。后续应从输入事件进入这条路径，同时保留
 长按关机菜单和开盖唤醒。实验运行配置已撤回，合盖和短按电源恢复
 原有的背光控制，没有部署调试环境变量、虚拟输入或自动解锁。
+
+## 2026-11-02 实测：挂起可用，但不省电
+
+在一台 `7.3.0-piano-sunuefi-cachy` 上连续验证 4 次，全部成功：
+
+```
+echo +N > /sys/class/rtc/rtc0/wakealarm
+systemctl suspend
+```
+
+- 内核走 `PM: suspend entry (deep)`，PSCI 依次关闭 CPU1–7
+  （`psci: CPU7 killed` …），恢复时全部重新拉起；
+  `suspend_stats/success` 逐次累加，`fail=0`。
+- 闹钟准点：`+60` 与 `+480` 两次实测唤醒误差均小于 5 秒；
+  唤醒后 Wi-Fi 自动重连、墙上时间正确、SSH 可回。
+- `rtc0` 纪元仍是 1970 也不影响：`+N` 按 RTC 自身计数值相对计时，
+  触发后 `wakealarm` 自动清零。`wakeup8 rtc@6100` 与
+  `wakeup7 pwrkey` 都是已启用的唤醒源，闹钟失效也能按电源键救回。
+- **日志时间假象**：`PM: suspend entry` 与 `Freezing user space`
+  相差近一分钟，是 journald 按 boottime 把睡前消息推到醒来之后，
+  不是真的卡在某个阶段。
+
+**功耗没有改善，反而更高。** 屏灭状态下同长度对照（能量法，
+两个电池包的 `charge_now` 相加）：
+
+| 状态 | 时长 | 掉电 | 折算 |
+| --- | --- | --- | --- |
+| 清醒（屏灭，笔扫描关） | 480 s | 38 mAh | 1.19 W |
+| 挂起（deep） | 481 s | 47 mAh | 1.46 W |
+| 挂起（deep，短测复核） | 408 s | 42 mAh | 1.55 W |
+
+即 CPU 确实断电了，但平台没有跟着掉压，挂起期间还比空闲多耗
+0.3 W 左右。日志里能对上的一条：`dwc3-qcom a600000.ssusb:
+port-1 HS-PHY not in L2`，USB PHY 没进低功耗态；
+`hwmon hwmon52: PM: parent phy0 should not be sleeping` 说明
+ath12k 的挂起顺序也有问题，WLAN 是否真正断电没确认。
+
+**因此自动睡眠仍保持关闭**：现在挂起既不省电，又会断 Wi-Fi
+（微信收不到），没有收益。先在挂起状态下把 USB PHY、WLAN 和
+调压这几条查清，再谈启用。
+
+**测量口径注意**：本机是两个独立电池包（`bq27z561-0/-1`，
+各 4.6 Ah 设计容量），必须把两路 `current_now` 相加。
+此前文档与记录里 0.68 W 的待机值只算了一路，真实空闲约 1.2 W。
+`power_avg` 属性不可用（两路都报 41.7 W，驱动单位错误）。
