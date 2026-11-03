@@ -1,0 +1,49 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/dts-v1/;
+/plugin/;
+
+/*
+ * PMK8550 RTC wall-clock offset, stored in SDAM2 at SID0:0x7172.
+ *
+ * The raw RTC counter is never rewritten. The pm8xxx RTC driver keeps the
+ * difference between wall clock and counter in a signed four-byte cell and
+ * converts absolute alarms through it. Without the cell rtc0 reports the 1970
+ * epoch after every boot, and only timesyncd makes the clock correct again.
+ *
+ * Allocation: bytes 0x72..0x75 of sdam@7100 have no consumer in the folded
+ * board DT. Existing children are restart@48, wr_thermal-flag@58,
+ * xo_calib-data@59, alarm-log@76 (0x76..0x7b) and the fmd-* flags at 0x9a and
+ * above. The cell sits immediately before the firmware alarm log, which is why
+ * the upstream author marked this change RFC and why it stays in drafts/ until
+ * the ownership check below passes.
+ *
+ * Promotion gate, on hardware:
+ *   1. write a pattern through the sdam@7100 nvmem device at 0x72..0x75,
+ *   2. read it back after a warm reboot and after one boot into Android,
+ *   3. read it back again after a powered-off cycle.
+ * Any byte that changes means firmware owns the window: drop this overlay
+ * instead of narrowing it. Then add the file to
+ * kernel.additional_dtb_overlays in config/release.json and confirm that
+ * `hwclock -w` followed by a reboot keeps rtc0 at wall clock.
+ */
+/ {
+	fragment@0 {
+		target-path = "/soc/qcom,spmi@c42d000/qcom,pmk8550@0/rtc@6100";
+		__overlay__ {
+			nvmem-cells = <&rtc_offset>;
+			nvmem-cell-names = "offset";
+		};
+	};
+
+	fragment@1 {
+		target-path = "/soc/qcom,spmi@c42d000/qcom,pmk8550@0/sdam@7100";
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			rtc_offset: rtc-offset@72 {
+				reg = <0x72 0x4>;
+			};
+		};
+	};
+};

@@ -96,3 +96,9 @@ ath12k 的挂起顺序也有问题，WLAN 是否真正断电没确认。
 挂起到不了深省电的候选修法见
 [并入上游 piano 整合方案的成果](../linux/piano-upstream-import.md)：
 RF 时钟投票、LLCC ISLAND1、RTC 偏移三条优先级最高。
+
+其中 RF 时钟投票已经可以从设备启动用的 `board.dtb` 里删掉
+（`kernel.board_property_removals`），但**默认关闭**。开启前先做一次
+不需要重新构建的对照：锁屏熄灭后 `rfkill block wifi` 再挂起 8 分钟，
+和 1.46 W 的基线比。这一条既能判断射频投票是不是主因，也能避免直接
+刷入一个可能让 WiFi 探测失败的 DTB。

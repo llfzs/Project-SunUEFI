@@ -49,14 +49,72 @@
 
 ## 落地方式
 
-不要把补丁直接塞进 `patches/linux/series.json`——那份序列有 sha256 与
-原始提交绑定，手工加条目会破坏校验。每条按下面的路子走：
+先确认一件容易搞错的事：**设备启动的 `board.dtb` 不是内核树编出来的**。
+`./build.sh linux` 只上传 `Image`、`System.map`、`config`、`manifest.json`、
+`modules`；打包时 `tools/package_release.py` 用的是
+`vendor/piano-linux/board.dtb`，再把 `kernel.additional_dtb_overlays` 里的
+`linux/dts/*.dtso` 用 `fdtoverlay` 叠上去。因此：
 
-- 设备树改动 → 新写 `linux/dts/piano-*.dtso`，由
-  `tools/build_piano_full_dtb.py` 参与合成。
-- 驱动改动 → 进 `patches/linux/7.3/` 并同步 `series.json` 与哈希，
-  或先由 `tools/apply_*.py` 的定点改写承担。
-- 每条都要有对应的单元测试或上机复测记录，再合并回 `dev`。
+- 改内核树里的 `arch/arm64/boot/dts/qcom/sm8750-xiaomi-piano.dts`
+  （例如 `patches/linux/7.3/0001-platform.patch`）**到不了设备**，只影响
+  在树内编 dtbs 的场合。
+- 覆盖层只能增加或改写属性，**不能用 `/delete-property/` 删属性**
+  （`fdtoverlay` 没有删除语义）。要删属性只能改 `board.dtb` 本身。
+- 驱动改动必须进 `patches/linux/7.3/`。那份序列有 sha256、原始提交父链和
+  最终 `target_tree` 三重绑定，加一条要重算 tree，只能在有内核仓库的
+  构建机上做：加条目（tree 先填占位）→ 跑
+  `python3 tools/prepare_release_kernel.py --refresh` 让它失败并在
+  `build/kernel-worktrees/<name>.failure.json` 里记下每一步的
+  `applied_tree` → 把真实 tree 填回 `series.json` 与 `config/release.json`
+  的 `target_tree` → 重跑通过。
+
+所以三条候选的实际归属是：
+
+| 补丁 | 落点 | 状态 |
+| --- | --- | --- |
+| 0004 去掉 RF 时钟投票 | 打包期定点改写 `board.dtb`（`--board-property-removal`） | 已实现并测试，默认未开启 |
+| 0001 RTC 偏移存 SDAM2 | `linux/dts/drafts/piano-rtc-offset.dtso` | 已写好，等占用核查 |
+| 0003 LLCC 预留 ISLAND1 | `patches/linux/7.3/` + `series.json` | 卡在构建机，未动 |
+
+## 2026-11-03：RF 时钟改打包期删除
+
+`vendor/piano-linux/board.dtb` 里 `/wcn7850-pmu` 的
+`clocks = <&rpmhcc 6>`（`RPMH_RF_CLK1`）就是这个投票的来源。属性删不掉，
+所以 `tools/package_release.py` 新增 `--board-property-removal NODE:PROPERTY`，
+在既有的 `normalize_mainline_bindings()` 里执行，并对这一条加了形状校验：
+必须是一个 cell pair、provider 必须是 `/soc/rsc@16500000/clock-controller-ml`、
+时钟号必须是 6。`config/release.json` 的 `kernel.board_property_removals`
+默认是空数组，翻转只需一行：
+
+```json
+"board_property_removals": [{ "node": "/wcn7850-pmu", "property": "clocks" }]
+```
+
+**先别开**。删掉之后如果 `pwrseq-qcom-wcn` 用的是非 optional 的
+`devm_clk_get()`，探测会失败，WiFi 和蓝牙直接起不来，而 SSH 是这台设备
+唯一的通道。上线前先做不需要构建的对照实验：
+
+1. 当前镜像，锁屏等 `bl_power=4`，`rfkill block wifi` 后再挂起 8 分钟，
+   量两路 `current_now`。基线是挂起 1.46 W、清醒 1.19 W。
+2. 明显下降 → 关闭射频投票确实有效，翻转上面那一行重建镜像。
+3. 几乎不变 → WLAN 芯片在挂起里本来就没断电，RF 时钟不是主因，不要动
+   `board.dtb`，转去看 `ath12k` 的挂起路径和面板。
+
+## 2026-11-03：RTC 偏移的占用核查
+
+`linux/dts/drafts/piano-rtc-offset.dtso` 给 `sdam@7100` 加一个
+`rtc-offset@72`（4 字节），并给 `rtc@6100` 加 `nvmem-cells` / `offset` 名。
+`tests/unit/test_piano_rtc_offset.py` 已经锁定：两个目标路径在 board.dtb
+里都存在、`0x72..0x75` 与现有子节点（`restart@48`、`wr_thermal-flag@58`、
+`xo_calib-data@59`、`alarm-log@76` 起于 0x76、`fmd-*` ≥ 0x9a）不重叠、
+board.dtb 目前还没有这个 cell。
+
+还差上机核查三条（原作者标了 RFC，就是因为这个）：写一段花样到
+`sdam@7100` 的 `0x72..0x75`，分别在一次热重启后、一次进 Android 后、
+一次关机再开机后读回。任何一字节变化就说明固件拥有这个窗口，放弃这条
+改动，不要改成更小的窗口。通过后再把文件加进
+`kernel.additional_dtb_overlays`，并确认 `hwclock -w` 之后重启 `rtc0`
+仍然是墙上时间。
 
 ## 不建议照搬的部分
 
