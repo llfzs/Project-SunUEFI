@@ -1,0 +1,49 @@
+From 1d5861e2ee37207904765fc51ee2c662cf48cb0f Mon Sep 17 00:00:00 2001
+From: yzddmr6 <46088090+yzddmr6@users.noreply.github.com>
+Date: 2026-10-28T02:02:14Z
+Subject: soc: qcom: llcc-qcom: Reserve ISLAND1 ways on SM8750
+
+
+The SM8750 table gives the island slice (LLCC_ISLAND1, SCID 12) its way
+mask 0x7fffffff as bonus ways and reserves none. Bonus ways are only
+allocated when no other slice has reserved them, while reserved ways
+belong to the slice alone. The first posting of the SM8750 support had
+these ways reserved, as the downstream table shipped for this SoC still
+has them (res_ways = 0x7fffffff, no bonus ways). They became bonus ways
+when v2 converted the table to designated initializers.
+
+With this table, system suspend resets the SoC once nothing votes for
+the LPASS core. On a Xiaomi Pad 8 Pro with LPASS_HW_MACRO_VOTE and
+LPASS_HW_DCODEC_VOTE released, all 16 suspend cycles that went to sleep
+(15 s2idle, one PSCI system suspend) ended in a reset; the PMIC PON log
+shows only PS_HOLD-triggered resets and no PMIC fault. Holding
+LPASS_HW_MACRO_VOTE across suspend avoided the reset, but CX then did
+not collapse. The reset stayed hidden while the LPASS macro codecs held
+both votes from probe, as they did before v7.3.
+
+Reserve the ways again. With that, all six s2idle cycles that went to
+sleep (48 to 60 s, no LPASS vote held) resumed normally, with the cxsd
+and ddr residencies within 0.1 s of the time asleep. With the votes
+released the ADSP enters island at runtime with either table; only
+suspend behaves differently. Why the missing reservation ends in a
+reset is not visible from Linux.
+
+Fixes: 2c04e58e30ce ("soc: qcom: llcc-qcom: Add support for SM8750")
+Link: https://lore.kernel.org/r/20250113-sm8750_llcc_master-v1-3-5389b92e2d7a@quicinc.com
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+
+diff --git a/drivers/soc/qcom/llcc-qcom.c b/drivers/soc/qcom/llcc-qcom.c
+--- a/drivers/soc/qcom/llcc-qcom.c
++++ b/drivers/soc/qcom/llcc-qcom.c
+@@ -3747,7 +3747,7 @@ static const struct llcc_slice_config sm8750_data[] = {
+ 		.max_cap = 7936,
+ 		.priority = 7,
+ 		.fixed_size = true,
+-		.bonus_ways = 0x7fffffff,
++		.res_ways = 0x7fffffff,
+ 	}, {
+ 		.usecase_id = LLCC_DISP_WB,
+ 		.slice_id = 23,
+
+-- 
+2.43.0

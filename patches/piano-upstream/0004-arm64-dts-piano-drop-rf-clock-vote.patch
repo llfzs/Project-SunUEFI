@@ -1,0 +1,39 @@
+From f46f8386ed887b04a33e5377ac31b8de168497ae Mon Sep 17 00:00:00 2001
+From: yzddmr6 <46088090+yzddmr6@users.noreply.github.com>
+Date: 2026-10-26T09:47:07Z
+Subject: arm64: dts: qcom: piano: drop the normal-mode RF clock vote
+
+
+The WCN7860 power sequencer treats its optional clock as a dependency of
+both WLAN and Bluetooth. Supplying RPMH_RF_CLK1 therefore requests the
+RF buffer in active, wake and sleep states for as long as either radio
+is powered, preventing the AP vote from being released during suspend.
+
+On this board the stock WLAN node has no clock input. The stock Bluetooth
+node describes this RF clock, but its driver only prepares and enables
+it from perform_fmd_operation(), not from the normal radio power-on
+path. It is not a normal-mode host-controlled clock dependency.
+
+Remove the clock from the PMU node and let the connectivity subsystem
+manage its normal clock demand. The sequencer already supports an absent
+clock; GPIO and regulator sequencing is unchanged. Using the active-only
+clock variant would still introduce a normal-mode AP vote absent from
+the stock driver.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+
+diff --git a/arch/arm64/boot/dts/qcom/sm8750-xiaomi-piano.dts b/arch/arm64/boot/dts/qcom/sm8750-xiaomi-piano.dts
+--- a/arch/arm64/boot/dts/qcom/sm8750-xiaomi-piano.dts
++++ b/arch/arm64/boot/dts/qcom/sm8750-xiaomi-piano.dts
+@@ -326,8 +326,6 @@
+ 		vddrfa1p2-supply = <&vreg_s7i_1p31>;
+ 		vddrfa1p8-supply = <&vreg_s3g_1p86>;
+ 
+-		clocks = <&rpmhcc RPMH_RF_CLK1>;
+-
+ 		status = "disabled";
+ 
+ 		regulators {
+
+-- 
+2.43.0

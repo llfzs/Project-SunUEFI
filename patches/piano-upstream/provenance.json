@@ -1,0 +1,142 @@
+{
+  "schema": 1,
+  "upstream_project": "https://github.com/yzddmr6/xiaomipad-8pro-mainline",
+  "kernel_repository": "https://github.com/yzddmr6/linux-sm8750-piano",
+  "kernel_branch": "piano/v0.9.2",
+  "kernel_base": "Linux 7.2.14 (e09610b541f2725a6382137c168e4efe208917c3)",
+  "license": "GPL-2.0-only",
+  "note": "补丁由 GitHub API 的提交内容还原，仅作移植参考；应用前需按本项目内核基线核对上下文。",
+  "imported": [
+    {
+      "file": "0001-arm64-dts-piano-rtc-offset-sdam2.patch",
+      "sha": "affe1b0b3ec47bc51989a9e9490d80a4d8b456ca",
+      "subject": "RFC: arm64: dts: qcom: piano: back the RTC offset with SDAM2",
+      "author": "yzddmr6",
+      "author_date": "2026-10-26T12:55:21Z",
+      "committed": "2026-10-27T04:19:54Z",
+      "files": [
+        "arch/arm64/boot/dts/qcom/sm8750-xiaomi-piano.dts"
+      ],
+      "truncated_files": [],
+      "source": "https://github.com/yzddmr6/linux-sm8750-piano",
+      "branch": "piano/v0.9.2"
+    },
+    {
+      "file": "0002-power-supply-xiaomi-mca-sleep-without-source.patch",
+      "sha": "e6da2db2e7bb3ec55aae9b9e3a05ac263c9e8703",
+      "subject": "power: supply: xiaomi_mca: let the system sleep with no source attached",
+      "author": "yzddmr6",
+      "author_date": "2026-10-27T01:10:03Z",
+      "committed": "2026-10-27T04:19:53Z",
+      "files": [
+        "drivers/power/supply/xiaomi_mca.c",
+        "drivers/power/supply/xiaomi_mca_test.c"
+      ],
+      "truncated_files": [],
+      "source": "https://github.com/yzddmr6/linux-sm8750-piano",
+      "branch": "piano/v0.9.2"
+    },
+    {
+      "file": "0003-soc-qcom-llcc-reserve-island1-sm8750.patch",
+      "sha": "1d5861e2ee37207904765fc51ee2c662cf48cb0f",
+      "subject": "soc: qcom: llcc-qcom: Reserve ISLAND1 ways on SM8750",
+      "author": "yzddmr6",
+      "author_date": "2026-10-28T02:02:14Z",
+      "committed": "2026-10-28T08:30:57Z",
+      "files": [
+        "drivers/soc/qcom/llcc-qcom.c"
+      ],
+      "truncated_files": [],
+      "source": "https://github.com/yzddmr6/linux-sm8750-piano",
+      "branch": "piano/v0.9.2"
+    },
+    {
+      "file": "0004-arm64-dts-piano-drop-rf-clock-vote.patch",
+      "sha": "f46f8386ed887b04a33e5377ac31b8de168497ae",
+      "subject": "arm64: dts: qcom: piano: drop the normal-mode RF clock vote",
+      "author": "yzddmr6",
+      "author_date": "2026-10-26T09:47:07Z",
+      "committed": "2026-10-26T14:29:37Z",
+      "files": [
+        "arch/arm64/boot/dts/qcom/sm8750-xiaomi-piano.dts"
+      ],
+      "truncated_files": [],
+      "source": "https://github.com/yzddmr6/linux-sm8750-piano",
+      "branch": "piano/v0.9.2"
+    },
+    {
+      "file": "0005-asoc-lpass-drop-unused-pm-clock-deps.patch",
+      "sha": "3348a47d033cca6d531364274f29f5593d059f5b",
+      "subject": "ASoC: codecs: lpass: remove unused PM clock dependencies",
+      "author": "yzddmr6",
+      "author_date": "2026-10-26T14:31:08Z",
+      "committed": "2026-10-26T14:31:08Z",
+      "files": [
+        "sound/soc/codecs/Kconfig"
+      ],
+      "truncated_files": [],
+      "source": "https://github.com/yzddmr6/linux-sm8750-piano",
+      "branch": "piano/v0.9.2"
+    },
+    {
+      "file": "0006-hid-nanosic-attach-command-instead-of-periodic-wake.patch",
+      "sha": "24142165d4f9485adc4bd2baf38395a8fb9cdc32",
+      "subject": "HID: nanosic: replace periodic keyboard wake with an attach command",
+      "author": "yzddmr6",
+      "author_date": "2026-10-14T02:03:14Z",
+      "committed": "2026-10-14T02:21:24Z",
+      "files": [
+        "drivers/hid/hid-nanosic-wn8030-test.c",
+        "drivers/hid/hid-nanosic-wn8030.c"
+      ],
+      "truncated_files": [],
+      "source": "https://github.com/yzddmr6/linux-sm8750-piano",
+      "branch": "piano/v0.9.2"
+    },
+    {
+      "file": "0007-hid-nanosic-panel-blanking-power.patch",
+      "sha": "64f228ab03899dbefe6373ebca1f675749404965",
+      "subject": "HID: nanosic: align piano bridge and accessory power with panel blanking",
+      "author": "yzddmr6",
+      "author_date": "2026-10-14T02:08:53Z",
+      "committed": "2026-10-14T02:49:29Z",
+      "files": [
+        "drivers/hid/Kconfig",
+        "drivers/hid/hid-nanosic-wn8030-test.c",
+        "drivers/hid/hid-nanosic-wn8030.c"
+      ],
+      "truncated_files": [],
+      "source": "https://github.com/yzddmr6/linux-sm8750-piano",
+      "branch": "piano/v0.9.2"
+    },
+    {
+      "file": "0008-spi-geni-qcom-deep-idle-during-gpi-dma.patch",
+      "sha": "322fd1bfbda9a3a74ab071c998a6ba6414a4e879",
+      "subject": "spi: geni-qcom: keep the system out of deep idle while a GPI DMA message runs",
+      "author": "yzddmr6",
+      "author_date": "2026-10-24T03:00:04Z",
+      "committed": "2026-10-24T03:00:04Z",
+      "files": [
+        "drivers/spi/spi-geni-qcom.c"
+      ],
+      "truncated_files": [],
+      "source": "https://github.com/yzddmr6/linux-sm8750-piano",
+      "branch": "piano/v0.9.2"
+    },
+    {
+      "file": "0009-input-nt36532e-skip-supply-queries-on-suspend.patch",
+      "sha": "722ec84628367aa3d1f20f64857d7a8d0166de30",
+      "subject": "Input: nt36532e-thp - exclude charge pumps and drain supply queries on suspend",
+      "author": "yzddmr6",
+      "author_date": "2026-10-22T01:45:26Z",
+      "committed": "2026-10-22T01:47:33Z",
+      "files": [
+        "drivers/input/touchscreen/nt36532e-thp/README.rst",
+        "drivers/input/touchscreen/nt36532e-thp/core.c"
+      ],
+      "truncated_files": [],
+      "source": "https://github.com/yzddmr6/linux-sm8750-piano",
+      "branch": "piano/v0.9.2"
+    }
+  ]
+}

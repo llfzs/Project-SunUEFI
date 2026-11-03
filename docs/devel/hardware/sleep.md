@@ -92,3 +92,7 @@ ath12k 的挂起顺序也有问题，WLAN 是否真正断电没确认。
 各 4.6 Ah 设计容量），必须把两路 `current_now` 相加。
 此前文档与记录里 0.68 W 的待机值只算了一路，真实空闲约 1.2 W。
 `power_avg` 属性不可用（两路都报 41.7 W，驱动单位错误）。
+
+挂起到不了深省电的候选修法见
+[并入上游 piano 整合方案的成果](../linux/piano-upstream-import.md)：
+RF 时钟投票、LLCC ISLAND1、RTC 偏移三条优先级最高。
