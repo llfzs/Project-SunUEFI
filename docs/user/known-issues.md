@@ -68,6 +68,8 @@ gsettings set org.gnome.desktop.a11y.applications screen-keyboard-enabled true
 * 新装系统需要自己通过 NetworkManager 保存 Wi-Fi。
 * Recovery 里的独立 SunUEFI 镜像已放弃，见[故障恢复](recovery.md#原厂-recovery)。
 * 测试设备是 CSOT 面板、16 GB 内存的平板，其他面板版本和内存容量没有测试过。
-* 自己装的三方应用如果在 `~/.local/share/applications` 里补了 `.desktop`，GNOME 要重新登录才会读到。当前会话里新加的启动器既进不了应用列表，添加到 dock 收藏也不显示。所以改完 `StartupWMClass`、图标这类启动器字段后，注销重登（或重启）才会生效。
+* 三方应用在 dock 上显示成蓝色宝石加齿轮的通用图标（GNOME 认不出是哪个应用），而启动器里的 `StartupWMClass` 明明写对了，先看窗口的 `WM_CLASS` 是否含中文。含中文的基本都是 mutter 的编码缺陷，不是配置写错：`WM_CLASS` 属性类型是 `STRING`（Latin-1），mutter 48 读取时做 `g_convert (res_class, -1, "UTF-8", "LATIN1")`，而中文应用写入的是 UTF-8 字节，于是 GNOME 内部拿到的类名是「每个字节当成一个 Latin-1 字符」的乱码（`安全接入` 变成 `å®...å…¥`），`StartupWMClass=安全接入` 永远对不上。可用改法是把 `StartupWMClass` 写成这个乱码形态，放进 `~/.local/share/applications/<id>.desktop` 覆盖厂商条目；改完不需要注销重登，重启该应用即生效。
+  * 排查陷阱：`xprop WM_CLASS` 显示的是正常的 `安全接入`，看上去一切正确，但那是 xprop 自己按 UTF-8 猜的，和 mutter 的解读不一致。要看 mutter 的视角，只能对着 `window-props.c` 的 `reload_wm_class` 推。
+* Electron 应用改不了窗口的 `WM_CLASS`：`--class` 和 `--wm-class` 都会被 Electron 用自身 app name 覆盖回去，命令行参数无效。中文 `WM_CLASS` 只能按上一条做适配。
 * `debian-kde` 由 CI 构建，实机上的桌面和硬件功能没有像 GNOME 那样逐项验证。
 * SteamOS 是实验版，游戏兼容性因游戏而异，见 [SteamOS](steamos.md)。
