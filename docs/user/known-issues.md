@@ -68,5 +68,6 @@ gsettings set org.gnome.desktop.a11y.applications screen-keyboard-enabled true
 * 新装系统需要自己通过 NetworkManager 保存 Wi-Fi。
 * Recovery 里的独立 SunUEFI 镜像已放弃，见[故障恢复](recovery.md#原厂-recovery)。
 * 测试设备是 CSOT 面板、16 GB 内存的平板，其他面板版本和内存容量没有测试过。
+* 自己装的三方应用如果在 `~/.local/share/applications` 里补了 `.desktop`，GNOME 要重新登录才会读到。当前会话里新加的启动器既进不了应用列表，添加到 dock 收藏也不显示。所以改完 `StartupWMClass`、图标这类启动器字段后，注销重登（或重启）才会生效。
 * `debian-kde` 由 CI 构建，实机上的桌面和硬件功能没有像 GNOME 那样逐项验证。
 * SteamOS 是实验版，游戏兼容性因游戏而异，见 [SteamOS](steamos.md)。
