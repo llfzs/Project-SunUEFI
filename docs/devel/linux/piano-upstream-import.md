@@ -35,14 +35,15 @@
 `linux-sm8750-piano` 分支 `piano/v0.9.2`（Linux 7.2.14 + 436 提交）。
 挑选标准是「与本项目已知问题直接相关且体积小」，说明见该目录 README。
 
-优先级最高三条：
+**已完成筛选，两条被实测排除**（2026-11-04，详见文末「对照实验结果」）：
 
-1. **0004 去掉常态 RF 时钟投票**：`RPMH_RF_CLK1` 让射频缓冲在
-   active/wake/sleep 全程持有 AP vote，挂起时释放不掉。这条与我们的
-   `ath12k` 挂起表现吻合。
-2. **0001 RTC 偏移存 SDAM2**：纯设备树改动，用 pm8xxx 现成的 nvmem
+1. **0001 RTC 偏移存 SDAM2**：纯设备树改动，用 pm8xxx 现成的 nvmem
    offset 机制，能把 1970 纪元问题从「靠网络对时」变成「开机就对」。
-3. **0003 LLCC 预留 ISLAND1**：一行改动，直接影响 LLC 在深睡时的状态。
+   原注释标了 RFC，上线前要核验 SDAM2 的 `0x72..0x75` 不被固件改写。
+2. **0003 LLCC 预留 ISLAND1**：一行改动，直接影响 LLC 在深睡时的状态。
+   属驱动表改动，只能在有内核仓库的构建机上进 `patches/linux/7.3/`。
+3. **0004 去掉常态 RF 时钟投票**：~~与 `ath12k` 挂起表现吻合~~
+   **已排除**——关掉 Wi-Fi 后挂起功耗只从 1.47 W 降到 1.46 W。
 
 排序依据是「改了能复测」：挂起功耗有 1.46 W 这个基线，改完再测一次就能
 判断有没有效，不需要等整套用户空间。
@@ -99,6 +100,31 @@
 2. 明显下降 → 关闭射频投票确实有效，翻转上面那一行重建镜像。
 3. 几乎不变 → WLAN 芯片在挂起里本来就没断电，RF 时钟不是主因，不要动
    `board.dtb`，转去看 `ath12k` 的挂起路径和面板。
+
+### 对照实验结果（2026-11-04）：按第 3 条处理
+
+`rfkill` 未安装，改用 `nmcli radio wifi off` + `echo freeze > /sys/power/state`
+做 8 分钟能量对照：
+
+| 状态 | 时长 | 掉电 | 折算 |
+| --- | --- | --- | --- |
+| s2idle，Wi-Fi 开 | 491 s | 47 mAh | 1.47 W |
+| s2idle，Wi-Fi 关 | 487 s | 46 mAh | 1.46 W |
+| 清醒，Wi-Fi 关 | 120 s | 8 mAh | 0.92 W |
+
+关掉射频后挂起功耗只降 0.01 W，而清醒态能省 0.27 W。**射频不是挂起
+功耗的主因**，因此 `kernel.board_property_removals` 继续保持空数组，
+0004 的优先级下调。同一轮还排除了 s2idle（1.47 W，与 deep 的 1.46 W
+一致）和 GPU 持有 CX（`3d00000.gpu-vddcx` 的 `use_count` 是 0，
+`pm_genpd` 里 `cx`/`cx_ao`/`ebi` 待机时已 off），细节见
+[硬件/睡眠](../hardware/sleep.md)。
+
+上游 v0.7.1→v0.8.0 那 25 个提交里，与深度睡眠相关的是 GPU 那组
+（`drm/msm: Always use component model for standalone GPU`、
+`Attach a driver to the GMU`、`a6xx: Mark cxpd device_link as stateless`）
+和 `usb: dwc3: qcom: Defer VBUS override update during system suspend`
+（对应我们的 `HS-PHY not in L2` 告警）。GPU 那组在本机没有可释放的 CX
+引用，**不建议照搬**；USB 那条值得单独评估。
 
 ## 2026-11-03：RTC 偏移的占用核查
 

@@ -84,9 +84,8 @@ port-1 HS-PHY not in L2`，USB PHY 没进低功耗态；
 `hwmon hwmon52: PM: parent phy0 should not be sleeping` 说明
 ath12k 的挂起顺序也有问题，WLAN 是否真正断电没确认。
 
-**因此自动睡眠仍保持关闭**：现在挂起既不省电，又会断 Wi-Fi
-（微信收不到），没有收益。先在挂起状态下把 USB PHY、WLAN 和
-调压这几条查清，再谈启用。
+**因此自动睡眠保持关闭**：现在挂起既不省电，又会断 Wi-Fi
+（微信收不到），没有收益。
 
 **测量口径注意**：本机是两个独立电池包（`bq27z561-0/-1`，
 各 4.6 Ah 设计容量），必须把两路 `current_now` 相加。
@@ -97,8 +96,48 @@ ath12k 的挂起顺序也有问题，WLAN 是否真正断电没确认。
 [并入上游 piano 整合方案的成果](../linux/piano-upstream-import.md)：
 RF 时钟投票、LLCC ISLAND1、RTC 偏移三条优先级最高。
 
-其中 RF 时钟投票已经可以从设备启动用的 `board.dtb` 里删掉
-（`kernel.board_property_removals`），但**默认关闭**。开启前先做一次
-不需要重新构建的对照：锁屏熄灭后 `rfkill block wifi` 再挂起 8 分钟，
-和 1.46 W 的基线比。这一条既能判断射频投票是不是主因，也能避免直接
-刷入一个可能让 WiFi 探测失败的 DTB。
+### 2026-11-04 复核：s2idle、射频、CX 三条都被排除
+
+上表的"平台没跟着掉压"不是措辞问题，而是结论：1.35–1.5 W 的挂起功耗
+真实存在，并且和挂起时长线性相关。
+
+**先纠正一个容易踩的坑**：`sleep.conf.d/piano.conf` 里的
+`MemorySleepMode=deep` 会让 systemd-sleep 在每次挂起前重写
+`/sys/power/mem_sleep`。手工 `echo s2idle > /sys/power/mem_sleep`
+读回是 `[s2idle] deep`，但 `systemctl suspend` 之后又变回 `[deep]`，
+日志照旧出现 `psci: CPU1–7 killed`。要测 s2idle 必须直接写
+`echo freeze > /sys/power/state`，绕开 systemd。
+
+| 状态 | 时长 | 掉电 | 折算 |
+| --- | --- | --- | --- |
+| 清醒（屏灭） | 480 s | 37 mAh | 1.19 W |
+| s2idle（`echo freeze`） | 491 s | 47 mAh | 1.47 W |
+| s2idle + `nmcli radio wifi off` | 487 s | 46 mAh | 1.46 W |
+| 清醒 + 关 Wi-Fi | 120 s | 8 mAh | 0.92 W |
+| s2idle 短测（用于验证线性） | 32 s | 3 mAh | 1.39 W |
+
+- **s2idle 不比 deep 省电**。`PM: suspend entry (s2idle)` 日志里没有
+  `Disabling non-boot CPUs`，CPU 只是进 WFI，功耗却和 deep 一样。
+- **射频不是主因**。关掉 Wi-Fi 后挂起只从 1.47 W 降到 1.46 W，
+  而清醒态关 Wi-Fi 能省 0.27 W。说明挂起时那 0.3 W 不来自 WLAN，
+  也就没有理由为了它去删 `RPMH_RF_CLK1`（0004 补丁优先级下调）。
+- **CX 不是被 GPU 卡住的**。清醒待机时
+  `/sys/kernel/debug/pm_genpd/` 里 `cx=off-0`、`cx_ao=off-0`、
+  `ebi=off-0`，`3d00000.gpu-vddcx` 的 `use_count` 是 0。上游那组
+  `drm/msm/adreno/a6xx: Mark cxpd device_link as stateless` 加上
+  GMU component model 的五条提交（v0.7.1→v0.8.0），针对的是
+  CX 被 GPU 长期持有的机型，对本机不适用。
+- **电量计没有骗人**。30 秒挂起掉 3 mAh，按同一速率外推 8 分钟是
+  48 mAh，和长测的 46–47 mAh 吻合，排除了"每次挂起固定跳变"。
+
+所以待机功耗的根因还没定位到。已知的边界：屏幕灭、背光
+`bl_power=4`、笔扫描关、CPU 99% idle、CX/EBI 已 off、Wi-Fi 已关，
+仍然 1.07 W；进入挂起后升到 1.35 W。剩下的大头要靠逐条 rail 与
+runtime PM 断开对照来找，`regulator_summary` 里可见的只有
+`piano_usb_ldog3` 下 `88e8000.ssphy-vdda-pll` 的 36 mA（约 43 mW），
+量级不够。
+
+**尚未排除**：USB PHY 未进 L2（`dwc3-qcom port-1 HS-PHY not in L2`）、
+面板模拟供电 `panel_avdd_ml`/`panel_avee_ml` 在灭屏后仍 enabled、
+以及 ath12k 挂起顺序（`hwmon52: PM: parent phy0 should not be sleeping`）。
+逐条断开需要在有内核仓库的构建机上做，或改用 runtime unbind 实验。
