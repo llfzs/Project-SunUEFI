@@ -32,6 +32,7 @@ fastboot -s SunUEFI-piano getvar product
 * 默认 120 Hz，可切换刷新率。12-bit / FRC 和连续可变刷新率（VRR）没有实现。
 * 部分 GTK 窗口连续缩放时帧率偏低，约每秒提交 30 帧。
 * 夜灯使用通用 sRGB 配置，不是原厂校准的颜色。
+* Chromium / Electron 应用（浏览器、VS Code、各类桌面客户端）如果跑在 XWayland 上，GPU 光栅化会把画面画坏：图片糊成一条色带、部分汉字和按钮文字不显示、窗口控制按钮消失。内容本身是好的，用 `--disable-gpu` 或 `--ozone-platform-hint=auto` 就能看到完整界面。后者要求会话里有 `XDG_SESSION_TYPE=wayland`，从桌面图标启动满足这个条件；从终端启动需要自己带上这个变量。修正后 WebGL 仍走 `ANGLE (freedreno, Adreno 830v1)`，不是软件渲染。
 
 ## 触控笔
 
