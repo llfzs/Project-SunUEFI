@@ -16,9 +16,9 @@ from build_piano_ram_bootstrap import guest_resolve
 ROOT=Path(__file__).resolve().parents[1]
 EXPECTED='a75f8c5d5fa099d65c171ac839c2e3bb6c63ec45'
 # Overlay files that are executed rather than read. Everything else is 0644.
-EXECUTABLES=frozenset({'usr/lib/piano/power-button', 'usr/lib/piano/sensor-power'})
+EXECUTABLES=frozenset({'usr/lib/piano/power-button'})
 # User units the graphical session starts on login.
-USER_UNITS=('piano-power-button.service', 'piano-sensor-power.service')
+USER_UNITS=('piano-power-button.service',)
 
 
 def stage_gnome_power(rootfs):

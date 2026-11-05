@@ -185,10 +185,6 @@ def default_system_record(rootfs, installed, config, desktop='gnome'):
     )
     if desktop == 'gnome':
         paths += ('etc/dconf/db/local.d/00-sunuefi', 'etc/dconf/db/local', 'etc/dconf/profile/user',
-                  'usr/lib/piano/sensor-power',
-                  'usr/lib/systemd/user/piano-sensor-power.service',
-                  'etc/systemd/user/graphical-session.target.wants/piano-sensor-power.service',
-                  'usr/share/polkit-1/rules.d/60-piano-sensor-power.rules',
                   'usr/lib/tuned/profiles/piano-power-saver/tuned.conf',
                   'usr/lib/tuned/profiles/piano-balanced/tuned.conf',
                   'usr/lib/tuned/profiles/piano-performance/tuned.conf',

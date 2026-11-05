@@ -21,8 +21,6 @@ KDE_PACKAGES = [
 GNOME_PATHS = (
     'etc/gdm3', 'etc/dconf', 'usr/share/glib-2.0/schemas/90_piano.gschema.override',
     'usr/lib/systemd/user/piano-power-button.service', 'usr/lib/piano/power-button',
-    'usr/lib/systemd/user/piano-sensor-power.service', 'usr/lib/piano/sensor-power',
-    'usr/share/polkit-1/rules.d/60-piano-sensor-power.rules',
     # KDE uses powerdevil, so the tuned profiles and their GNOME mapping go away
     # with the rest of the GNOME-only overlay.
     'usr/lib/tuned/profiles/piano-power-saver',
@@ -31,7 +29,6 @@ GNOME_PATHS = (
     'etc/tuned/piano-ppd.conf',
     'usr/lib/systemd/system/tuned-ppd.service.d',
     'etc/systemd/user/graphical-session.target.wants/piano-power-button.service',
-    'etc/systemd/user/graphical-session.target.wants/piano-sensor-power.service',
     'etc/systemd/logind.conf.d/piano.conf', 'etc/udev/rules.d/70-piano-power-button.rules',
 )
 

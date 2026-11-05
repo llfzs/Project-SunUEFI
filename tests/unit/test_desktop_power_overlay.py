@@ -102,11 +102,6 @@ class PowerOverlayTest(unittest.TestCase):
         self.assertIn('BindReadOnlyPaths=/etc/tuned/piano-ppd.conf:/etc/tuned/ppd.conf', drop_in)
         self.assertTrue((OVERLAY / 'etc/tuned/piano-ppd.conf').is_file())
 
-    def test_sensor_rule_limits_itself_to_the_proxy(self):
-        rule = (OVERLAY / 'usr/share/polkit-1/rules.d/60-piano-sensor-power.rules').read_text()
-        self.assertIn('org.freedesktop.systemd1.manage-units', rule)
-        self.assertIn('iio-sensor-proxy.service', rule)
-
 
 if __name__ == '__main__':
     unittest.main()
