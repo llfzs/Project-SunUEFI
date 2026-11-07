@@ -4,7 +4,7 @@
   "kernel_version": "7.3.0",
   "base_commit": "c03c1a14507dfaf8b856c2608f9ac216021fc222",
   "base_tree": "30fd2ef82912c26cf3a58ad0ba6afc375fa851ac",
-  "target_tree": "78e5f4edfacd2e5310f9461052cfd34ef91e3f18",
+  "target_tree": "4185daf413ec3ff22bc37706442f61b64c4abd0d",
   "original_target_commit": "c474d439f79df18b44bf5e93926fc8affbdb2fa6",
   "source_url": "https://github.com/torvalds/linux.git",
   "patches": [
@@ -30,7 +30,7 @@
       "original_commit": "a10f1574fc3777df1620e4d5a21b486c80aeef77",
       "original_parent": "9c1dc6ae5f15e2187cb7641673cf01fbdfa2d777",
       "committer_date": "2026-10-20T12:00:00+00:00",
-      "tree": "cef92c9eeb2dfa33620dae81256897b7d598e149"
+      "tree": "763c20ee731fbad1ef381e64dd7d347683df5535"
     },
     {
       "file": "0004-media.patch",
@@ -38,7 +38,7 @@
       "original_commit": "d6cf6285ac6eb22436569951f86a1787b5230cd9",
       "original_parent": "a10f1574fc3777df1620e4d5a21b486c80aeef77",
       "committer_date": "2026-10-20T12:00:00+00:00",
-      "tree": "719e1b758ea7d0955e893ad9388a37b3eca976d3"
+      "tree": "146b50a62367b04e5eb0303da77a77ceaec51b08"
     },
     {
       "file": "0005-audio.patch",
@@ -46,7 +46,7 @@
       "original_commit": "5a47432e43099cfe86e0e2f0e821bdbb5823c128",
       "original_parent": "d6cf6285ac6eb22436569951f86a1787b5230cd9",
       "committer_date": "2026-10-20T12:00:00+00:00",
-      "tree": "3b247098d7e59bb70d0f2996d7b72288bfd2dadb"
+      "tree": "7e48c2e557cb59f7a52e59b5bfc7e965d8fc2f6a"
     },
     {
       "file": "0006-gunyah.patch",
@@ -54,7 +54,7 @@
       "original_commit": "bdcb9ab6e0a81d1e4c6eb44a449752f6fd23166b",
       "original_parent": "5a47432e43099cfe86e0e2f0e821bdbb5823c128",
       "committer_date": "2026-10-20T12:00:00+00:00",
-      "tree": "3257886314372e0132135c0e3b2b2991d9267b50"
+      "tree": "c99cbae8c1a934f89e42aaeb3d4fb33e013b8ad3"
     },
     {
       "file": "0007-bore.patch",
@@ -62,7 +62,7 @@
       "original_commit": "2fa9735471b09fc702560ebb478a12456620eb1d",
       "original_parent": "bdcb9ab6e0a81d1e4c6eb44a449752f6fd23166b",
       "committer_date": "2026-10-20T12:00:00+00:00",
-      "tree": "1ab6f8bab647c498f2840224ad23b65cef1bfd8b"
+      "tree": "6299d468a77c65465caff7a511036b6311fab26a"
     },
     {
       "file": "0008-drm-msm-gem-api.patch",
@@ -70,7 +70,7 @@
       "original_commit": "948540b67ca51994ff799d02592856aa1e0c17a6",
       "original_parent": "2fa9735471b09fc702560ebb478a12456620eb1d",
       "committer_date": "2026-10-20T14:00:00+00:00",
-      "tree": "1ea36a39edfb73d90c5e7b5bdb062e8324cf3b55"
+      "tree": "7eafaa39cde904242efc6d906fd9ef7cbd977044"
     },
     {
       "file": "0009-gunyah-rmap-api.patch",
@@ -78,7 +78,7 @@
       "original_commit": "95f8b55c62eb2cac8f331913aced9f8e5d849f70",
       "original_parent": "948540b67ca51994ff799d02592856aa1e0c17a6",
       "committer_date": "2026-10-20T14:10:00+00:00",
-      "tree": "bf44482de290f2793bb1c9d22f11eb275d1fee5d"
+      "tree": "5ecceefd64bf10f456b9fb8a15745a182ae12004"
     },
     {
       "file": "0010-gunyah-dt-availability.patch",
@@ -86,7 +86,7 @@
       "original_commit": "21a155746e066cf1c6f69ab879ca971a3124e7f2",
       "original_parent": "95f8b55c62eb2cac8f331913aced9f8e5d849f70",
       "committer_date": "2026-10-20T15:50:00+00:00",
-      "tree": "89d2aad905c7e14699f641ac3394e0a7cccc862b"
+      "tree": "2156a9d8862dc14ff1f79ea8ed15301b16e5965e"
     },
     {
       "file": "0011-fastrpc-drain-ssr-invokes.patch",
@@ -94,7 +94,7 @@
       "original_commit": "679af40069fab5a72bf4c3bdc76ab760ae33db63",
       "original_parent": "21a155746e066cf1c6f69ab879ca971a3124e7f2",
       "committer_date": "2026-10-22T00:30:00+08:00",
-      "tree": "9e708487db96356af9d4cb48218b89734445e751"
+      "tree": "35102b060ead3387be3c86c1f2db359ed435ff25"
     },
     {
       "file": "0012-asoc-q6apm-avoid-unregistered-query.patch",
@@ -102,7 +102,7 @@
       "original_commit": "3141d26caacec6ca2ca39713ed6a05868fd54aee",
       "original_parent": "679af40069fab5a72bf4c3bdc76ab760ae33db63",
       "committer_date": "2026-10-21T19:19:53+00:00",
-      "tree": "d9ab27d8a094614e11a75487e507c3432a7ad176"
+      "tree": "35707428f061defc1c876f290f3b819b42aa4a69"
     },
     {
       "file": "0013-asoc-va-sm8750-core-votes.patch",
@@ -110,7 +110,7 @@
       "original_commit": "e355cc7a99beb1d6c244685d512696fd9925c0c2",
       "original_parent": "3141d26caacec6ca2ca39713ed6a05868fd54aee",
       "committer_date": "2026-10-22T04:35:06+08:00",
-      "tree": "4a2587ec3e6f43cc01696ca79613254488cf048f"
+      "tree": "36d64d1e01b957e6f0da0d7b67a9a02996aafff6"
     },
     {
       "file": "0014-qcomtee-large-shared-memory.patch",
@@ -118,7 +118,7 @@
       "original_commit": "19e821eaee6ce74f9bc1fcf8830c16c28261e1d2",
       "original_parent": "e355cc7a99beb1d6c244685d512696fd9925c0c2",
       "committer_date": "2026-10-22T06:28:54+08:00",
-      "tree": "2f33f7f070f712e5a0bea7991a19f0a76b9b5cf4"
+      "tree": "7cea9539131e87dadfb9d51ebd7bcb2816bcfec9"
     },
     {
       "file": "0015-remoteproc-sm8750-cdsp-sync-memory.patch",
@@ -126,7 +126,7 @@
       "original_commit": "c2d32344450463b6a6b2bfafec0b55b3ac568656",
       "original_parent": "19e821eaee6ce74f9bc1fcf8830c16c28261e1d2",
       "committer_date": "2026-10-22T07:46:25+08:00",
-      "tree": "c200de0da2aecb925a7ecf7db107be3866fcb116"
+      "tree": "a90f42b8c4292505a9f18ecc2c31ead0168aeff4"
     },
     {
       "file": "0016-drm-igcv5-high-precision-dither.patch",
@@ -134,7 +134,7 @@
       "original_commit": "199a927f4743ebb98784073132ddd42cbcf793ea",
       "original_parent": "c2d32344450463b6a6b2bfafec0b55b3ac568656",
       "committer_date": "2026-10-22T08:11:04+08:00",
-      "tree": "438c9dcd6bd566c6f5d165e7b8c1ae14ae779185"
+      "tree": "6a64180b7c7c767be5284994279769e4202f4119"
     },
     {
       "file": "0017-uio-piano-fingerprint-control.patch",
@@ -142,7 +142,7 @@
       "original_commit": "6b9029bb823f582b5dd70bd4bb715ed1abb7b239",
       "original_parent": "199a927f4743ebb98784073132ddd42cbcf793ea",
       "committer_date": "2026-10-22T09:07:21+08:00",
-      "tree": "6b7976cb4ee3bf8d66680c06e208bd73fabc8fe9"
+      "tree": "9ba5515c3e7a096f7b42af3116683e0e02287eaf"
     },
     {
       "file": "0018-qcomtee-public-buffers-cma.patch",
@@ -150,7 +150,7 @@
       "original_commit": "cd9cceac5bdd293a5372b272c94ab73303c3a817",
       "original_parent": "6b9029bb823f582b5dd70bd4bb715ed1abb7b239",
       "committer_date": "2026-10-22T10:18:53+08:00",
-      "tree": "28adb1cb8ddd7264526601e8e35177820d8434af"
+      "tree": "f47d21f10efed427da2b1e2ccc185aaac67d4abd"
     },
     {
       "file": "0019-pmic-glink-altmode-connector-children.patch",
@@ -158,7 +158,7 @@
       "original_commit": "a37030e54e258222c175a8738c4a2d645816c289",
       "original_parent": "cd9cceac5bdd293a5372b272c94ab73303c3a817",
       "committer_date": "2026-10-22T11:23:20+08:00",
-      "tree": "629d9bfa1ca3af9bb0618a937f9ecaa2e96b7bb6"
+      "tree": "a8c7d4757d86ec64a6d7301314e5209fa0fb0b14"
     },
     {
       "file": "0020-ucsi-glink-connector-children.patch",
@@ -166,7 +166,7 @@
       "original_commit": "b113b8f42c73c695d7d54255e783193122aa2173",
       "original_parent": "a37030e54e258222c175a8738c4a2d645816c289",
       "committer_date": "2026-10-22T11:42:46+08:00",
-      "tree": "08ab72fffa4229ce59d67cda74051dffc278a53d"
+      "tree": "8155d730b186f333d5e7c800e185a38a77e972d6"
     },
     {
       "file": "0021-ucsi-prefer-numbered-connectors.patch",
@@ -174,7 +174,7 @@
       "original_commit": "37817d0275707f2ec3d62725f769befa9dc2a7a0",
       "original_parent": "b113b8f42c73c695d7d54255e783193122aa2173",
       "committer_date": "2026-10-22T11:52:43+08:00",
-      "tree": "8629e18d01c0a8607c22b0946647593e5146b220"
+      "tree": "ec720d883d0c1be0c49468da6849416fbfd8fcba"
     },
     {
       "file": "0022-ucsi-initial-usb-mux.patch",
@@ -182,7 +182,7 @@
       "original_commit": "03070a4d1f8910f4e1bb74af65366f45fe8d14c3",
       "original_parent": "37817d0275707f2ec3d62725f769befa9dc2a7a0",
       "committer_date": "2026-10-22T12:27:17+08:00",
-      "tree": "399d075608845683187ed3b6776a118e35851a39"
+      "tree": "2f2053d48948215e26701df1f8532d4d3848d96a"
     },
     {
       "file": "0023-dpu-shared-video-ctl.patch",
@@ -190,7 +190,7 @@
       "original_commit": "57b1e6db5a831d416ad438b7490144e6f8ee6af9",
       "original_parent": "03070a4d1f8910f4e1bb74af65366f45fe8d14c3",
       "committer_date": "2026-10-22T17:59:50+08:00",
-      "tree": "444fbef54cbc07eb2db6165eb648b99cca2236b5"
+      "tree": "32bf8f9f827267aa093e63ababf2315d06bc3f1c"
     },
     {
       "file": "0024-hid-nanosic-feature-and-release.patch",
@@ -198,7 +198,7 @@
       "original_commit": "220cdeac7e4ec4e1a8bc4c2400c71fa00b21b084",
       "original_parent": "57b1e6db5a831d416ad438b7490144e6f8ee6af9",
       "committer_date": "2026-10-22T18:25:53+08:00",
-      "tree": "4a5923915b4214f850287fc51c658781dc54a195"
+      "tree": "45e5c2cebde9de47d946aad339837a6c42b17c78"
     },
     {
       "file": "0025-ucsi-clear-released-connectors.patch",
@@ -206,7 +206,7 @@
       "original_commit": "892a593ae83389a645076451ba27221504d3dc33",
       "original_parent": "220cdeac7e4ec4e1a8bc4c2400c71fa00b21b084",
       "committer_date": "2026-10-25T12:04:07+00:00",
-      "tree": "4b127fa70ffa79e78a259c8289ef7e632822edec"
+      "tree": "335e85a1af9632d75a696c4cd90b0a1751c90a9d"
     },
     {
       "file": "0026-mca-recover-pd-input.patch",
@@ -214,7 +214,7 @@
       "original_commit": "9d00bb4aa4a47a3b18da35b9ac1317ec72173e20",
       "original_parent": "892a593ae83389a645076451ba27221504d3dc33",
       "committer_date": "2026-10-25T14:59:44Z",
-      "tree": "2aa1815b3e5c97943d522dd176f3d059c0c268eb"
+      "tree": "b7b4118faeaf3b19732433ab1649d806d9dee691"
     },
     {
       "file": "0027-power-piano-mipps-authentication.patch",
@@ -222,7 +222,7 @@
       "original_commit": "3176c9930508dac813a7ab8bc38739b0cb47297e",
       "original_parent": "9d00bb4aa4a47a3b18da35b9ac1317ec72173e20",
       "committer_date": "2026-10-28T14:11:38Z",
-      "tree": "d2d5a2393f557fed97e2d8a5cb020961f8b5408a"
+      "tree": "a89f339bdc71d83346e2a80785ac283141940d76"
     },
     {
       "file": "0028-power-piano-otg-configuration.patch",
@@ -230,7 +230,7 @@
       "original_commit": "c474d439f79df18b44bf5e93926fc8affbdb2fa6",
       "original_parent": "3176c9930508dac813a7ab8bc38739b0cb47297e",
       "committer_date": "2026-10-28T15:31:00Z",
-      "tree": "78e5f4edfacd2e5310f9461052cfd34ef91e3f18"
+      "tree": "4185daf413ec3ff22bc37706442f61b64c4abd0d"
     }
   ],
   "provenance": {

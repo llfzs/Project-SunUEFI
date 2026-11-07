@@ -44,8 +44,25 @@ EEVDF 内核等价。性能、功耗和硬件支持以对应版本的运行结�
 现在该函数与写入路径对称——无条件执行 `nvt_set_custom_cmd(0x04, mode != 0)`，
 只有 mode 非零时才继续发 `nvt_thp_set_pen_switch(mode)`。
 
-因此这一步的 `sha256` 已在 `series.json` 中同步更新，但 `tree`（以及后续各步的
-结果树与 `target_tree`）仍是上游重放得到的旧值：这些值只能在真实内核仓库上
-应用补丁后算出。重建内核时若 `tools/prepare_release_kernel.py` 报
-`Applied patch tree mismatch: 0003-input-wireless.patch`，属预期结果，
-按该次实际的 `git rev-parse HEAD^{tree}` 回填后再重跑即可。
+## 修改补丁后必须重算 `series.json` 的 `tree`
+
+`series.json` 里每一步的 `tree` 都是**累积**结果树——该补丁应用后内核根树的对象
+哈希。`tools/prepare_release_kernel.py` 会逐步 `git am` 并与记录值比对，不一致就
+中止（CI 也照此执行，报 `Applied patch tree mismatch`）。所以改动任何一个补丁，
+它自己的 `tree` 和其后所有补丁的 `tree`、以及 `target_tree` 都会跟着变。
+
+改完后重算，`config/release.json` 的 `kernel.target_tree` 也要同步。只需要基线
+提交的对象，用临时索引重放即可，不必检出工作树：
+
+```
+git init --bare /tmp/kv && git --git-dir=/tmp/kv fetch --depth=1 <source_url> <base_commit>
+export GIT_INDEX_FILE=/tmp/kv.idx
+git --git-dir=/tmp/kv read-tree <base_commit>          # 结果应等于 series.json 的 base_tree
+for p in patches/linux/7.3/00*.patch; do
+    git --git-dir=/tmp/kv apply --cached --whitespace=error "$p" &&
+    echo "$p $(git --git-dir=/tmp/kv write-tree)"
+done
+```
+
+第一步 `read-tree` 的哈希必须等于记录的 `base_tree`，前两个补丁的 `write-tree` 也
+必须与记录值一致——这两处对不上说明源基线不对，后面的值不能采信。
