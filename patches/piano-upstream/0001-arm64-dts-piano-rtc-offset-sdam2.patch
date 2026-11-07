@@ -1,0 +1,66 @@
+From affe1b0b3ec47bc51989a9e9490d80a4d8b456ca Mon Sep 17 00:00:00 2001
+From: yzddmr6 <46088090+yzddmr6@users.noreply.github.com>
+Date: 2026-10-26T12:55:21Z
+Subject: RFC: arm64: dts: qcom: piano: back the RTC offset with SDAM2
+
+
+Keep the PMK8550 raw RTC counter unchanged and use the existing pm8xxx
+nvmem offset support for wall-clock time and absolute alarm conversion.
+Android maintains its own file-backed offset from that same counter.
+
+Connect a four-byte offset cell at SDAM2 offset 0x72 (SID0:0x7172).
+Remove the stale read-only diagnostic node at 0x7200: the stock PMK8550
+DT places SDAM2 at 0x7100, already described by pmk8550.dtsi.
+
+This is a conditional candidate. The stock DT does not describe another
+consumer of bytes 0x72-0x75, but that does not establish firmware ownership.
+Do not deploy until this allocation is verified on the board and its
+contents survive Android and powered-off transitions. No direct counter
+writes or firmware-variable storage are enabled.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+(cherry picked from commit 968ed4ca97de6c3a1f28528e00c553ffeda88b1a)
+
+diff --git a/arch/arm64/boot/dts/qcom/sm8750-xiaomi-piano.dts b/arch/arm64/boot/dts/qcom/sm8750-xiaomi-piano.dts
+--- a/arch/arm64/boot/dts/qcom/sm8750-xiaomi-piano.dts
++++ b/arch/arm64/boot/dts/qcom/sm8750-xiaomi-piano.dts
+@@ -1379,18 +1379,6 @@
+ 	};
+ };
+ 
+-&pmk8550 {
+-	/* Diagnostic SDAM2 window only; no RTC offset or writable cells. */
+-	nvram@7200 {
+-		compatible = "qcom,spmi-sdam";
+-		reg = <0x7200>;
+-		#address-cells = <1>;
+-		#size-cells = <1>;
+-		ranges = <0 0x7200 0x80>;
+-		read-only;
+-	};
+-};
+-
+ &pmih0108_eusb2_repeater {
+ 	vdd18-supply = <&vreg_l15b_1p8>;
+ 	vdd3-supply = <&vreg_l5b_3p1>;
+@@ -1402,6 +1390,17 @@
+ 	qcom,squelch-detector-bp = <(-3000)>;
+ };
+ 
++&pmk8550_rtc {
++	nvmem-cells = <&rtc_offset>;
++	nvmem-cell-names = "offset";
++};
++
++&pmk8550_sdam_2 {
++	rtc_offset: rtc-offset@72 {
++		reg = <0x72 0x4>;
++	};
++};
++
+ &pon_pwrkey {
+ 	status = "okay";
+ };
+
+-- 
+2.43.0

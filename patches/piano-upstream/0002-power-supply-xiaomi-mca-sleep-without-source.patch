@@ -1,0 +1,136 @@
+From e6da2db2e7bb3ec55aae9b9e3a05ac263c9e8703 Mon Sep 17 00:00:00 2001
+From: yzddmr6 <46088090+yzddmr6@users.noreply.github.com>
+Date: 2026-10-27T01:10:03Z
+Subject: power: supply: xiaomi_mca: let the system sleep with no source attached
+
+
+Once the charge policy had written a limit, system sleep was refused
+until a recognized source came back: xiaomi_mca_prepare() hands the input
+current limit back through xiaomi_mca_restore_icl(), which does not write
+while the firmware reports no recognized source and returns -EOPNOTSUPP.
+Unplugged, the firmware reports the Unknown type, so a tablet that had
+been charged once could not suspend on battery:
+
+  xiaomi_mca ...: cannot quiesce charging for system sleep: -95
+  PM: device_prepare(): xiaomi_mca_prepare [xiaomi_mca] returns -95
+
+With no source attached there is nothing to hand back: the limits and
+the voltage request only matter for the next source, and
+xiaomi_mca_policy_poll() resets the limits on attach before any policy
+runs. Skip the handback when VBUS is absent and keep the limit flags, so
+the attach path still restores the defaults. An attached source of
+unknown type still refuses sleep, as before.
+
+Add a KUnit case that sleeps with no VBUS and an Unknown source and
+checks that the next attach restores the defaults; the existing case for
+an attached source of unknown type keeps expecting the refusal. ARM64
+QEMU KUnit: 45/45 pass; the new case fails without this change.
+
+Fixes: a988f93ff6ad ("power: supply: xiaomi_mca: hand charging back before system sleep")
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+
+diff --git a/drivers/power/supply/xiaomi_mca.c b/drivers/power/supply/xiaomi_mca.c
+--- a/drivers/power/supply/xiaomi_mca.c
++++ b/drivers/power/supply/xiaomi_mca.c
+@@ -3043,7 +3043,26 @@ static int xiaomi_mca_quiesce(struct xiaomi_mca *mca)
+ 	int ret, wait_ret;
+ 
+ 	ret = xiaomi_mca_cp_stop(mca, "system sleep");
+-	ret = ret ?: xiaomi_mca_restore_icl(mca);
++	if (ret)
++		return ret;
++
++	/*
++	 * With no source attached there is nothing to hand back: the limits
++	 * and voltage only matter for the next source, and the attach path in
++	 * xiaomi_mca_policy_poll() resets them before any policy runs.
++	 * Refusing system sleep here kept a tablet that had been charged once
++	 * from ever suspending on battery. An attached source of unknown type
++	 * still refuses it, as no automatic write is allowed for that one.
++	 */
++	if (mca->icl_written || mca->fcc_written || mca->voltage_written) {
++		ret = xiaomi_mca_read(mca, MCA_PROP_USB_VOLTAGE_NOW, &vbus);
++		if (ret)
++			return ret;
++		if (vbus < MCA_VBUS_ONLINE_UV)
++			goto out;
++	}
++
++	ret = xiaomi_mca_restore_icl(mca);
+ 	if (!ret && mca->fcc_written)
+ 		ret = xiaomi_mca_reset_fcc(mca);
+ 	if (ret)
+@@ -3065,6 +3084,7 @@ static int xiaomi_mca_quiesce(struct xiaomi_mca *mca)
+ 			return ret ?: wait_ret;
+ 	}
+ 
++out:
+ 	mca->cp = MCA_CP_OFF;
+ 	mca->hv = MCA_HV_OFF;
+ 	mca->voltage_written = false;
+
+diff --git a/drivers/power/supply/xiaomi_mca_test.c b/drivers/power/supply/xiaomi_mca_test.c
+--- a/drivers/power/supply/xiaomi_mca_test.c
++++ b/drivers/power/supply/xiaomi_mca_test.c
+@@ -941,17 +941,50 @@ static void xiaomi_mca_test_pm_refused(struct kunit *test)
+ 	KUNIT_EXPECT_FALSE(test, f->mca.sleeping);
+ 	KUNIT_EXPECT_EQ(test, f->mca.fcc_set_ma, 900);
+ 	KUNIT_EXPECT_TRUE(test, schedule_delayed_work(&f->mca.poll_work, 60 * HZ));
+-	/* An unknown source must not silently drop a pending ICL restore. */
++	/* An attached source of unknown type must not silently drop a pending ICL restore. */
+ 	f->mca.fcc_set_ma = 0;
+ 	f->mca.fcc_written = false;
+ 	f->mca.icl_written = true;
++	f->write_error = 0;
+ 	f->type = MCA_TYPE_UNKNOWN;
+ 	KUNIT_EXPECT_EQ(test, xiaomi_mca_prepare(f->mca.dev), -EOPNOTSUPP);
+ 	cancel_delayed_work_sync(&f->mca.poll_work);
+ 	KUNIT_EXPECT_TRUE(test, f->mca.icl_written);
+ 	KUNIT_EXPECT_FALSE(test, f->mca.sleeping);
+ }
+ 
++/* Charged once, then unplugged: no VBUS, and the firmware reports an Unknown source. */
++static void xiaomi_mca_test_pm_no_source(struct kunit *test)
++{
++	struct mca_policy_fixture *f = mca_policy_fixture(test);
++
++	f->type = MCA_TYPE_UNKNOWN;
++	f->vbus = 0;
++	f->icl = 500;
++	f->fcc = 900;
++	f->mca.icl_written = true;
++	f->mca.icl_set_ma = 500;
++	f->mca.fcc_set_ma = 900;
++	f->mca.fcc_written = true;
++	f->mca.voltage_written = true;
++	KUNIT_ASSERT_EQ(test, xiaomi_mca_prepare(f->mca.dev), 0);
++	KUNIT_EXPECT_TRUE(test, f->mca.sleeping);
++	KUNIT_EXPECT_EQ(test, f->writes, 0);
++	/* Nothing is dropped: the next recognized source gets the defaults. */
++	KUNIT_EXPECT_TRUE(test, f->mca.icl_written);
++	KUNIT_EXPECT_TRUE(test, f->mca.fcc_written);
++	xiaomi_mca_complete(f->mca.dev);
++	cancel_delayed_work_sync(&f->mca.poll_work);
++	f->type = MCA_TYPE_SDP;
++	f->vbus = 5000000;
++	scoped_guard(mutex, &f->mca.lock)
++		xiaomi_mca_policy_poll(&f->mca);
++	KUNIT_EXPECT_EQ(test, f->icl, MCA_ICL_DEFAULT_MA);
++	KUNIT_EXPECT_EQ(test, f->fcc, MCA_FCC_DEFAULT_MA);
++	KUNIT_EXPECT_FALSE(test, f->mca.icl_written);
++	KUNIT_EXPECT_FALSE(test, f->mca.fcc_written);
++}
++
+ static void xiaomi_mca_test_pm_voltage_timeout(struct kunit *test)
+ {
+ 	struct mca_policy_fixture *f = mca_policy_fixture(test);
+@@ -1432,6 +1465,7 @@ static struct kunit_case xiaomi_mca_test_cases[] = {
+ 	KUNIT_CASE(xiaomi_mca_test_pm_quiesce),
+ 	KUNIT_CASE(xiaomi_mca_test_cp_stop_failure),
+ 	KUNIT_CASE(xiaomi_mca_test_pm_refused),
++	KUNIT_CASE(xiaomi_mca_test_pm_no_source),
+ 	KUNIT_CASE_SLOW(xiaomi_mca_test_pm_voltage_timeout),
+ 	KUNIT_CASE(xiaomi_mca_test_pm_lost_ack),
+
+-- 
+2.43.0

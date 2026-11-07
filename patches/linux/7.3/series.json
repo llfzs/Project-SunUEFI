@@ -26,7 +26,7 @@
     },
     {
       "file": "0003-input-wireless.patch",
-      "sha256": "1ccee651df41cf14b4a5af74362732f4602734946c4af5cbf5fb2f7dafc2de39",
+      "sha256": "042d812d50501ff4d31068912a2b7691ee15c386a7a7aae0a4be6e30916ba25e",
       "original_commit": "a10f1574fc3777df1620e4d5a21b486c80aeef77",
       "original_parent": "9c1dc6ae5f15e2187cb7641673cf01fbdfa2d777",
       "committer_date": "2026-10-20T12:00:00+00:00",

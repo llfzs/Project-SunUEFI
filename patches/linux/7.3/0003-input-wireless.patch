@@ -20,7 +20,7 @@ Subject: [PATCH] feat(input-wireless): port Piano input-wireless support to
  drivers/input/touchscreen/Makefile            |    1 +
  drivers/input/touchscreen/nt36532e/Kconfig    |   13 +
  drivers/input/touchscreen/nt36532e/Makefile   |    9 +
- drivers/input/touchscreen/nt36532e/nt36xxx.c  | 2646 +++++++++++++++++
+ drivers/input/touchscreen/nt36532e/nt36xxx.c  | 2648 +++++++++++++++++
  drivers/input/touchscreen/nt36532e/nt36xxx.h  |  249 ++
  .../touchscreen/nt36532e/nt36xxx_fw_update.c  |  925 ++++++
  .../touchscreen/nt36532e/nt36xxx_mem_map.h    |  733 +++++
@@ -36,7 +36,7 @@ Subject: [PATCH] feat(input-wireless): port Piano input-wireless support to
  drivers/net/wireless/ath/ath12k/wifi7/hw.c    |   96 +
  drivers/net/wireless/ath/ath12k/wifi7/pci.c   |   34 +
  drivers/net/wireless/ath/ath12k/wmi.c         |   21 +
- 31 files changed, 8508 insertions(+), 32 deletions(-)
+ 31 files changed, 9171 insertions(+), 693 deletions(-)
  create mode 100644 drivers/hid/hid-nanosic-wn8030.c
  create mode 100644 drivers/input/misc/piano-pen-dock.c
  create mode 100644 drivers/input/touchscreen/nt36532e/Kconfig
@@ -3224,7 +3224,7 @@ new file mode 100644
 index 00000000000..309d623fd61
 --- /dev/null
 +++ b/drivers/input/touchscreen/nt36532e/nt36xxx.c
-@@ -0,0 +1,2646 @@
+@@ -0,0 +1,2648 @@
 +// SPDX-License-Identifier: GPL-2.0
 +
 +/*
@@ -3862,11 +3862,13 @@ index 00000000000..309d623fd61
 +	int ret;
 +
 +	mode = READ_ONCE(ts->thp_stylus_mode);
-+	if (!mode)
-+		return 0;
 +
-+	ret = nvt_set_custom_cmd(0x04, 1);
-+	if (!ret)
++	/*
++	 * Always resend command 0x04: every firmware reload drops the IC back
++	 * to pen scanning, so mode 0 has to actively disable it again.
++	 */
++	ret = nvt_set_custom_cmd(0x04, mode != 0);
++	if (!ret && mode)
 +		ret = nvt_thp_set_pen_switch(mode);
 +	if (ret)
 +		NVT_ERR("failed to restore THP stylus state: %d\n", ret);

@@ -108,6 +108,8 @@ args = ['python3', 'tools/package_release.py',
         '--panel-vendor', kernel['preferred_display_mode']['panel_vendor']]
 for overlay in kernel['additional_dtb_overlays']:
     args += ['--dtb-overlay', overlay]
+for removal in kernel.get('board_property_removals', []):
+    args += ['--board-property-removal', removal['node'] + ':' + removal['property']]
 args += ['--initramfs', 'build/distros/release/initramfs/initramfs.cpio.gz',
          '--rootfs', 'build/distros/release/rootfs',
          '--rootfs-manifest', 'build/distros/release/manifest.json',

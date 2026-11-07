@@ -32,3 +32,20 @@ DSI 原子回调、FastRPC 响应等待、QMP 电源管理及 PCIe MSI 初始化
 不是屏幕或触控刷新率。保留 BORE 自身的运行参数默认值；
 `kernel.sched_bore=0` 可用于同一内核的对照，但不宣称它与完全未打补丁的
 EEVDF 内核等价。性能、功耗和硬件支持以对应版本的运行结果为准。
+
+## 0003 中的本地修复：笔扫描状态恢复
+
+`0003-input-wireless.patch` 里的 `nvt_thp_restore_stylus()` 原先在
+`thp_stylus_mode == 0` 时直接返回。但每次固件重新下载都会把 IC 恢复成笔扫描
+开启，于是用户态写进 `/proc/nvt_thp_stylus` 的 mode 0 在 resume 或 ESD 恢复后
+失效：实测中断从 0/10s 回到约 120/s，`piano-touch-view` 空转 7.6% CPU，
+整机空闲功耗随之抬升。
+
+现在该函数与写入路径对称——无条件执行 `nvt_set_custom_cmd(0x04, mode != 0)`，
+只有 mode 非零时才继续发 `nvt_thp_set_pen_switch(mode)`。
+
+因此这一步的 `sha256` 已在 `series.json` 中同步更新，但 `tree`（以及后续各步的
+结果树与 `target_tree`）仍是上游重放得到的旧值：这些值只能在真实内核仓库上
+应用补丁后算出。重建内核时若 `tools/prepare_release_kernel.py` 报
+`Applied patch tree mismatch: 0003-input-wireless.patch`，属预期结果，
+按该次实际的 `git rev-parse HEAD^{tree}` 回填后再重跑即可。

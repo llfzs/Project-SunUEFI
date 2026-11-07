@@ -1,0 +1,115 @@
+From 322fd1bfbda9a3a74ab071c998a6ba6414a4e879 Mon Sep 17 00:00:00 2001
+From: yzddmr6 <46088090+yzddmr6@users.noreply.github.com>
+Date: 2026-10-24T03:00:04Z
+Subject: spi: geni-qcom: keep the system out of deep idle while a GPI DMA message runs
+
+
+In GPI DMA mode the data moves between the SE FIFO and DDR without the CPU,
+so every CPU may enter idle while a message is in flight. On SM8750 the
+system low power domain is then entered and the DMA stalls until it is left
+again: on the Xiaomi Pad 8 Pro the 5450-byte reads of the NT36532E touch
+controller at 19.2 MHz took 2.46 ms or exactly 4.85 ms, 43-51 % slow, in
+runs, with the firmware idle as well as scanning. ftrace shows the system
+domain (PSCI 0x0200c354, 4400 us exit latency) being entered during 2678 of
+2945 slow reads; a CPU latency limit of 2000 us (above the cluster state's
+1983 us) makes every read 2.0-2.7 ms, and the bandwidth vote for the DDR
+path alone does not help. The stalled transactions were the host-side cause
+of a single-frame whole-screen washout on the TDDI panel while the touch
+firmware scans: it reproduced with the limit off and stopped with it on,
+reversibly, in the same boot.
+
+Hold the limit from prepare_message to unprepare_message in GPI mode only,
+like spi-mt65xx does around its messages.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+
+diff --git a/drivers/spi/spi-geni-qcom.c b/drivers/spi/spi-geni-qcom.c
+--- a/drivers/spi/spi-geni-qcom.c
++++ b/drivers/spi/spi-geni-qcom.c
+@@ -14,6 +14,7 @@
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
+ #include <linux/pm_opp.h>
++#include <linux/pm_qos.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/property.h>
+ #include <linux/soc/qcom/geni-se.h>
+@@ -78,8 +79,17 @@
+ #define GSI_CPHA		BIT(4)
+ #define GSI_CPOL		BIT(5)
+ 
++/*
++ * CPU latency limit held while a GPI DMA message is in flight. On SM8750 the
++ * system low power domain (exit latency 4400 us in the DT) is otherwise
++ * entered with the DMA running and stalls it; the cluster state (1983 us)
++ * is harmless. Measured on piano, see the commit message.
++ */
++#define SPI_GENI_GPI_QOS_US	2000
++
+ struct spi_geni_master {
+ 	struct geni_se se;
++	struct pm_qos_request pm_qos;
+ 	struct device *dev;
+ 	u32 tx_fifo_depth;
+ 	u32 fifo_width_bits;
+@@ -548,14 +558,36 @@ static int spi_geni_prepare_message(struct spi_controller *spi,
+ 		return ret;
+ 
+ 	case GENI_GPI_DMA:
+-		/* nothing to do for GPI DMA */
++		/*
++		 * The DMA engine moves the data to DDR on its own while every
++		 * CPU may be idle waiting for the completion interrupt. Keep
++		 * the system out of the low power mode that stalls it.
++		 */
++		cpu_latency_qos_update_request(&mas->pm_qos, SPI_GENI_GPI_QOS_US);
+ 		return 0;
+ 	}
+ 
+ 	dev_err(mas->dev, "Mode not supported %d", mas->cur_xfer_mode);
+ 	return -EINVAL;
+ }
+ 
++static int spi_geni_unprepare_message(struct spi_controller *spi,
++				      struct spi_message *spi_msg)
++{
++	struct spi_geni_master *mas = spi_controller_get_devdata(spi);
++
++	if (mas->cur_xfer_mode == GENI_GPI_DMA)
++		cpu_latency_qos_update_request(&mas->pm_qos, PM_QOS_DEFAULT_VALUE);
++	return 0;
++}
++
++static void spi_geni_remove_qos(void *data)
++{
++	struct spi_geni_master *mas = data;
++
++	cpu_latency_qos_remove_request(&mas->pm_qos);
++}
++
+ static void spi_geni_release_dma_chan(void *data)
+ {
+ 	struct spi_geni_master *mas = data;
+@@ -1101,6 +1133,7 @@ static int spi_geni_probe(struct platform_device *pdev)
+ 	spi->max_speed_hz = 50000000;
+ 	spi->max_dma_len = 0xffff0; /* 24 bits for tx/rx dma length */
+ 	spi->prepare_message = spi_geni_prepare_message;
++	spi->unprepare_message = spi_geni_unprepare_message;
+ 	spi->transfer_one = spi_geni_transfer_one;
+ 	spi->can_dma = geni_can_dma;
+ 	spi->dma_map_dev = dev->parent;
+@@ -1122,6 +1155,11 @@ static int spi_geni_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		return ret;
+ 
++	cpu_latency_qos_add_request(&mas->pm_qos, PM_QOS_DEFAULT_VALUE);
++	ret = devm_add_action_or_reset(dev, spi_geni_remove_qos, mas);
++	if (ret)
++		return ret;
++
+ 	pm_runtime_use_autosuspend(&pdev->dev);
+ 	pm_runtime_set_autosuspend_delay(&pdev->dev, 250);
+ 	ret = devm_pm_runtime_enable(dev);
+
+-- 
+2.43.0

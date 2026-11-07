@@ -23,9 +23,33 @@ from compose_piano_dtb import read_fdt, write_fdt
 ROOT = Path(__file__).resolve().parents[1]
 MIB = 1024 * 1024
 CLOCK_EPOCH = 'usr/lib/clock-epoch'
+WCN_PMU_NODE = '/wcn7850-pmu'
+RPMH_CLOCK_CONTROLLER = '/soc/rsc@16500000/clock-controller-ml'
 
 
-def normalize_mainline_bindings(board):
+def remove_board_property(tree, node, property):
+    """Delete one reviewed property from the folded Android DT."""
+    props = tree.get(node)
+    require(props is not None, 'Board property removal targets a missing node: ' + node)
+    require(property in props,
+            'Board property removal targets a missing property: ' + node + ':' + property)
+    if (node, property) == (WCN_PMU_NODE, 'clocks'):
+        # Only the WCN PMU's single RF clock supply is removable here. The
+        # specifier must stay one cell pair on the AP RPMh controller: RPMH_RF_CLK1
+        # (index 6, as spelled in the board DTS that produced this DT) keeps the
+        # radio buffer voted in active, wake and sleep while either radio is up.
+        raw = props[property]
+        require(len(raw) == 8, 'WCN PMU clocks is not a single specifier')
+        provider = tree.get(RPMH_CLOCK_CONTROLLER, {})
+        require(provider.get('phandle') == raw[:4],
+                'WCN PMU clock is not supplied by the AP RPMh controller')
+        require(provider.get('#clock-cells') == struct.pack('>I', 1),
+                'RPMh clock controller cell count changed')
+        require(struct.unpack('>I', raw[4:])[0] == 6, 'WCN PMU clock is not RPMH_RF_CLK1')
+    del props[property]
+
+
+def normalize_mainline_bindings(board, removals=()):
     """Remove downstream-only bindings retained by the folded Android DT."""
     parsed = read_fdt(board.read_bytes())
     tree, changes = parsed['tree'], []
@@ -131,6 +155,9 @@ def normalize_mainline_bindings(board):
         # slice prevents registration of the entire SDAM, including OCP.
         del props['bits']
         changes.append(path + ':bits')
+    for node, property in removals:
+        remove_board_property(tree, node, property)
+        changes.append(node + ':' + property)
     if changes:
         board.write_bytes(write_fdt(parsed))
     return {'changes': changes, 'sha256': sha(board)}
@@ -139,6 +166,13 @@ def normalize_mainline_bindings(board):
 def require(ok, message):
     if not ok:
         raise ValueError(message)
+
+
+def parse_board_property_removal(value):
+    node, _, property = value.rpartition(':')
+    require(node.startswith('/') and property and ':' not in node,
+            'Invalid board property removal: ' + value)
+    return node, property
 
 
 def sha(path):
@@ -520,7 +554,7 @@ def package(args):
     extra_dtb_overlays = []
     for overlay in args.dtb_overlay:
         extra_dtb_overlays.append(apply_cpu_model_overlay(work / 'board.dtb', overlay, work, cpu_only=False))
-    mainline_bindings = normalize_mainline_bindings(work / 'board.dtb')
+    mainline_bindings = normalize_mainline_bindings(work / 'board.dtb', args.board_property_removal)
     panel_selection = None
     if args.panel_vendor:
         panel_selection = select_panel_vendor(work / 'board.dtb', args.panel_vendor)
@@ -583,6 +617,9 @@ def parser():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--cpu-model-overlay', type=Path)
     ap.add_argument('--dtb-overlay', type=Path, action='append', default=[])
+    ap.add_argument('--board-property-removal', action='append', default=[],
+                    type=parse_board_property_removal, metavar='NODE:PROPERTY',
+                    help='Delete one reviewed property from the folded board DT')
     ap.add_argument('--panel-vendor', choices=('auto', 'boe', 'csot'))
     for name in ('uefi', 'kernel', 'dtb', 'initramfs', 'rootfs', 'output'):
         ap.add_argument('--' + name, type=Path, required=True)
