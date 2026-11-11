@@ -17,6 +17,8 @@ case "$command" in
   steamos-rootfs) python3 tools/build_steamos_rootfs.py "$@" ;;
   nyarch-rootfs|nyarch-gnome-rootfs) python3 tools/build_nyarch_rootfs.py "$@" ;;
   gsd) python3 tools/build_gsd_packages.py "$@" ;;
+  upower) python3 tools/host/build_upower_packages.py "$@" ;;
+  pipewire) python3 tools/host/build_pipewire_packages.py "$@" ;;
   mutter)
     if (($#)); then
       python3 tools/build_mutter_packages.py "$@"
@@ -25,22 +27,34 @@ case "$command" in
     fi ;;
   linux)
     python3 tools/prepare_release_kernel.py --refresh
-    python3 - <<'PY_KERNEL'
-import json, subprocess
+    python3 - "$@" <<'PY_KERNEL'
+import json, subprocess, sys
 from pathlib import Path
 record=json.loads(Path('build/release/source-manifest.json').read_text())
 subprocess.run(['python3','tools/build_piano_full_kernel.py','--worktree',record['worktree'],
  '--commit',record['actual_commit'],'--root','LABEL=PIANOROOT','--rebuild',
- '--build-dir','build/kernels/release','--artifacts','artifacts/kernels/release'],check=True)
+ '--build-dir','build/kernels/release','--artifacts','artifacts/kernels/release',*sys.argv[1:]],check=True)
 PY_KERNEL
     ;;
   mesa)
     # Mesa is a native Debian package build; its Python dependencies come from
     # APT, not the isolated virtualenv used for UEFI font preparation.
-    env -u VIRTUAL_ENV -u PYTHONHOME -u PYTHONPATH \
-      PATH=/usr/sbin:/usr/bin:/sbin:/bin \
-      bash upstream/piano-mesa-current/scripts/build-mesa-debs.sh \
-      "${1:-$sunuefi_root/build/mesa}" 26.1.6-1~bpo13+1 ;;
+    python3 - "${1:-$sunuefi_root/build/mesa}" <<'PY_MESA'
+import os, sys
+from pathlib import Path
+sys.path.insert(0, 'tools')
+from host.package_build import run_cached
+source = Path('upstream/piano-mesa-current')
+env = os.environ.copy()
+for name in ('VIRTUAL_ENV', 'PYTHONHOME', 'PYTHONPATH'):
+    env.pop(name, None)
+env['PATH'] = '/usr/sbin:/usr/bin:/sbin:/bin'
+inputs = [Path('build.sh'), Path('config/build-container.json'),
+          source / 'scripts/build-mesa-debs.sh', *sorted((source / 'patches').glob('*.patch'))]
+run_cached(Path(sys.argv[1]).resolve(), [path.resolve() for path in inputs],
+           ['bash', source / 'scripts/build-mesa-debs.sh', sys.argv[1], '26.1.6-1~bpo13+1'], env)
+PY_MESA
+    ;;
   sensors)
     python3 - "$sunuefi_root" "${1:-$sunuefi_root/build/sensors}" "${@:2}" <<'PY_SENSORS'
 import hashlib, json, os, shutil, subprocess, sys
@@ -74,8 +88,16 @@ build_env = os.environ.copy()
 for name in ('VIRTUAL_ENV', 'PYTHONHOME', 'PYTHONPATH'):
     build_env.pop(name, None)
 build_env['PATH'] = '/usr/sbin:/usr/bin:/sbin:/bin'
-subprocess.run(['bash', workspace / 'scripts/build-sensors-debs.sh', output, *selection],
-               env=build_env, check=True)
+sys.path.insert(0, str(root / 'tools'))
+from host.package_build import run_cached
+if selection:
+    subprocess.run(['bash', workspace / 'scripts/build-sensors-debs.sh', output, *selection],
+                   env=build_env, check=True)
+else:
+    run_cached(output, [root / 'build.sh', root / 'config/build-container.json',
+                       source / 'scripts/build-sensors-debs.sh',
+                       *[root / name for name in config['patches']]],
+               ['bash', workspace / 'scripts/build-sensors-debs.sh', output], build_env, selection=config)
 shutil.copy2(workspace / 'SOURCE', output / 'SOURCE')
 PY_SENSORS
     ;;
@@ -130,7 +152,7 @@ PY_PACKAGE
   install) python3 tools/install_piano.py "$@" ;;
   installer) python3 tools/export_installer.py "$@" ;;
   help|-h|--help)
-    printf '%s\n' 'Usage: ./build.sh sources|check|uefi|trampoline|module|module-package|boot-request|boot-repack|linux|mesa|sensors|display-calibration|ffmpeg|gsd|mutter|bsp|rootfs|release-rootfs|steamos-rootfs|package|all|installer|install' \
+    printf '%s\n' 'Usage: ./build.sh sources|check|uefi|trampoline|module|module-package|boot-request|boot-repack|linux|mesa|sensors|display-calibration|ffmpeg|gsd|upower|pipewire|mutter|bsp|rootfs|release-rootfs|steamos-rootfs|package|all|installer|install' \
       'Full builds need the documented builder environment; rootfs/Mesa/sensors run in a root ARM64 build container.' \
       'release-rootfs reads its kernel source worktree from build/release/source-manifest.json.' \
       'Building never partitions or flashes a tablet. install is a separate explicit command.' ;;

@@ -44,7 +44,7 @@ def repository(path, commit=None, tree=None):
 
 def plan(kernel, source, output, mesa_dir=None, runtime_dir=None, kernel_build=None,
          public_source=None, firmware_source=None, macros=None, v4l2_source=None, root=ROOT, resume=False,
-         sensors_dir=None, ffmpeg_dir=None, boot_task_snapshot=False, desktop='gnome'):
+         sensors_dir=None, ffmpeg_dir=None, boot_task_snapshot=False, desktop='gnome', mutter_dir=None):
     root = Path(root).resolve(); config = json.loads((root / 'config/release.json').read_text())
     if desktop not in ('gnome', 'kde'):
         raise ValueError('Release desktop must be gnome or kde')
@@ -93,6 +93,11 @@ def plan(kernel, source, output, mesa_dir=None, runtime_dir=None, kernel_build=N
     ffmpeg = Path(ffmpeg_dir).resolve() if ffmpeg_dir else None
     if ffmpeg:
         ffmpeg_packages(ffmpeg, root)
+    mutter = Path(mutter_dir).resolve() if mutter_dir else None
+    if mutter:
+        if desktop != 'gnome':
+            raise ValueError('--mutter-dir is only valid for the GNOME desktop')
+        mutter_packages(mutter)
     if runtime_dir:
         if not (Path(runtime_dir) / 'manifest.json').is_file(): missing.append('matching runtime bundle manifest')
     else:
@@ -115,6 +120,7 @@ def plan(kernel, source, output, mesa_dir=None, runtime_dir=None, kernel_build=N
             'output': str(output), 'rootfs': str(output / 'rootfs'), 'mesa_dir': str(mesa) if mesa else None,
             'sensors_dir': str(sensors),
             'ffmpeg_dir': str(ffmpeg) if ffmpeg else None,
+            'mutter_dir': str(mutter) if mutter else None,
             'boot_task_snapshot': boot_task_snapshot,
             'runtime_dir': str(Path(runtime_dir).resolve()) if runtime_dir else None,
             'kernel_build': str(Path(kernel_build or root / 'build/kernels/release').resolve()),
@@ -465,16 +471,19 @@ def gsd_packages(folder):
     folder = Path(folder).resolve()
     metadata = folder.parent / 'SOURCE.json'
     source = json.loads(metadata.read_text())
-    patch = ROOT / 'patches/gnome-settings-daemon/0001-power-optional-device-ambient-profile.patch'
-    patches = [{'path': patch.relative_to(ROOT).as_posix(), 'sha256': digest(patch)}]
+    import build_gsd_packages as builder
+    patches = builder.patch_records()
     if source.get('packages_built') is not True or source.get('patches') != patches:
         raise ValueError('GNOME power packages do not match the current ambient policy; rebuild with ./build.sh gsd')
     rows = {}
-    for path in sorted(folder.glob('*.deb')):
+    for package_name, expected in sorted(source.get('packages', {}).items()):
+        if Path(expected['file']).name != expected['file']:
+            raise ValueError('Invalid GNOME power package filename')
+        path = folder / expected['file']
         package, version, arch = [capture(['dpkg-deb', '-f', path, field])
-                                  for field in ('Package', 'Version', 'Architecture')]
+                                   for field in ('Package', 'Version', 'Architecture')]
         row = {'file': path.name, 'version': version, 'architecture': arch, 'sha256': digest(path)}
-        if (package in rows or arch not in ('arm64', 'all') or
+        if (package != package_name or package in rows or arch not in ('arm64', 'all') or
                 version != source.get('package_version') or '+sunuefi' not in version or
                 source.get('packages', {}).get(package) != row):
             raise ValueError('GNOME power runtime package identity differs: ' + path.name)
@@ -581,8 +590,9 @@ def execute(record):
     cfg = record['config']; public = Path(record['public_source']); m, kernel_hash = modules.inspect(kernel)
     desktop = record.get('desktop', 'gnome')
     abi = runtime.kernel_identity(Path(record['kernel_build']), source, m['source_commit'], m['kernel_release'])
-    helper_cc = ('clang' if platform.machine() in ('aarch64', 'arm64') or
-                 not shutil.which('aarch64-linux-gnu-gcc') else 'aarch64-linux-gnu-gcc')
+    # Clang selects the target GCC libraries from the supplied Debian sysroot.
+    # A host cross-GCC can otherwise mix its own libc linker scripts into it.
+    helper_cc = 'clang' if shutil.which('clang') else 'aarch64-linux-gnu-gcc'
     if record['runtime_dir']:
         saved = json.loads((Path(record['runtime_dir']) / 'manifest.json').read_text())
         if saved.get('status') != 'RUNTIME_COMPILED_NOT_DEVICE_TESTED' or saved.get('kernel') != abi or saved.get('public_commit') != cfg['debian']['commit']:
@@ -607,13 +617,25 @@ def execute(record):
                  '--suite', cfg['debian']['suite'], '--output', out, '--mesa-dir', record['mesa_dir']])
         if not (out / 'COMPLETE').is_file() or rootfs.stat().st_uid: raise ValueError('Base desktop build did not complete with native guest ownership')
         put(rootfs, 'usr/sbin/policy-rc.d', '#!/bin/sh\nexit 101\n'); (rootfs / 'usr/sbin/policy-rc.d').chmod(0o755)
+        from host import build_upower_packages
+        upower_folder = ROOT / 'build/upower'
+        upower = build_upower_packages.build(upower_folder, rootfs)
+        from host import build_pipewire_packages
+        pipewire_folder = ROOT / 'build/pipewire'
+        run([ROOT / 'build.sh', 'pipewire', '--rootfs', rootfs, '--output', pipewire_folder])
+        pipewire = build_pipewire_packages.reusable(
+            pipewire_folder, build_pipewire_packages.debian_version(rootfs), 'deb')
+        if pipewire is None:
+            raise ValueError('PipeWire GStreamer plugin does not match the target ABI')
         gsd_folder = ROOT / 'build/gsd/runtime'
-        if desktop == 'gnome' and not (gsd_folder.parent / 'SOURCE.json').is_file():
+        import build_gsd_packages as gsd_builder
+        if desktop == 'gnome' and not gsd_builder.reusable(gsd_folder.parent):
             run([sys.executable, ROOT / 'tools/build_gsd_packages.py', '--output',
                  gsd_folder.parent, '--sysroot', rootfs])
         gsd = gsd_packages(gsd_folder) if desktop == 'gnome' else {'packages': {}}
-        mutter_folder = ROOT / 'build/mutter/runtime'
-        if desktop == 'gnome' and not (mutter_folder.parent / 'SOURCE.json').is_file():
+        mutter_folder = Path(record.get('mutter_dir') or ROOT / 'build/mutter/runtime')
+        import build_mutter_packages as mutter_builder
+        if desktop == 'gnome' and not record.get('mutter_dir') and not mutter_builder.reusable(mutter_folder.parent):
             run([sys.executable, ROOT / 'tools/build_mutter_packages.py', '--output',
                  mutter_folder.parent, '--sysroot', rootfs])
         mutter = mutter_packages(mutter_folder) if desktop == 'gnome' else {'packages': {}}
@@ -626,6 +648,16 @@ def execute(record):
             shutil.copy2(mutter_folder / row['file'], destination)
             if digest(destination) != row['sha256']:
                 raise ValueError('Mutter package changed while staging: ' + row['file'])
+        for row in upower['packages'].values():
+            destination = gsd_stage / row['file']
+            shutil.copy2(upower_folder / 'runtime' / row['file'], destination)
+            if digest(destination) != row['sha256']:
+                raise ValueError('UPower package changed while staging')
+        for row in pipewire['packages'].values():
+            destination = gsd_stage / row['file']
+            shutil.copy2(pipewire_folder / 'runtime' / row['file'], destination)
+            if digest(destination) != row['sha256']:
+                raise ValueError('PipeWire package changed while staging')
         sensor_stage = target(rootfs, 'tmp/piano-sensors-packages')
         sensor_stage.mkdir(parents=True, exist_ok=True)
         for row in sensors['packages'].values():
@@ -647,6 +679,10 @@ def execute(record):
                                   for row in gsd['packages'].values())
             local_packages.extend('/tmp/piano-gnome-packages/' + row['file']
                                   for row in mutter['packages'].values())
+            local_packages.extend('/tmp/piano-gnome-packages/' + row['file']
+                                  for row in upower['packages'].values())
+            local_packages.extend('/tmp/piano-gnome-packages/' + row['file']
+                                  for row in pipewire['packages'].values())
             if ffmpeg:
                 local_packages.extend('/tmp/piano-ffmpeg-packages/' + row['file']
                                       for row in ffmpeg['packages'].values())
@@ -722,6 +758,12 @@ def execute(record):
         for package, row in mutter['packages'].items():
             if installed.get(package) != row['version']:
                 raise ValueError('Installed Mutter package version differs: ' + package)
+        for package, row in upower['packages'].items():
+            if installed.get(package) != row['version']:
+                raise ValueError('Installed UPower package version differs: ' + package)
+        for package, row in pipewire['packages'].items():
+            if installed.get(package) != row['version']:
+                raise ValueError('Installed PipeWire plugin version differs: ' + package)
         metadata = {str(p.relative_to(rootfs)): digest(p) for p in (rootfs / 'var/lib/apt/lists').glob('*InRelease')}
         if not metadata: raise ValueError('Signed APT InRelease metadata is missing')
         metadata.update({str(p.relative_to(rootfs)): digest(p) for p in (rootfs / 'etc/apt').rglob('*') if p.is_file()})
@@ -737,7 +779,7 @@ def execute(record):
                   'adapters_manifest_sha256': digest(out / 'adapters/manifest.json'), 'runtime_manifest_sha256': digest(bundle / 'manifest.json'),
                   'apt_policy': cfg['debian']['apt_policy'], 'apt_metadata': metadata, 'debian_commit': cfg['debian']['commit'],
                   'mesa_packages': mesa, 'sensors': sensors, 'ffmpeg': ffmpeg, 'gnome_power': gsd,
-                  'mutter': mutter,
+                  'mutter': mutter, 'upower': upower, 'pipewire': pipewire,
                   'boot_request': boot_request, 'firmware_commit': cfg['firmware']['commit'],
                   'clock_epoch': clock,
                   'default_system': defaults, 'desktop': desktop,
@@ -754,7 +796,7 @@ def execute(record):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('kernel', 'source', 'output'): parser.add_argument('--' + name, type=Path, required=True)
-    for name in ('mesa-dir', 'sensors-dir', 'ffmpeg-dir', 'runtime-dir', 'kernel-build', 'public-source', 'firmware-source', 'macros', 'v4l2-source'): parser.add_argument('--' + name, type=Path)
+    for name in ('mesa-dir', 'sensors-dir', 'ffmpeg-dir', 'mutter-dir', 'runtime-dir', 'kernel-build', 'public-source', 'firmware-source', 'macros', 'v4l2-source'): parser.add_argument('--' + name, type=Path)
     mode = parser.add_mutually_exclusive_group(required=True); mode.add_argument('--plan', action='store_true'); mode.add_argument('--execute', action='store_true')
     parser.add_argument('--resume', action='store_true', help='Reuse the completed upstream base and refresh release assembly')
     parser.add_argument('--desktop', choices=('gnome', 'kde'), default='gnome')

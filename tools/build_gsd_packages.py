@@ -10,21 +10,28 @@ import shutil
 import shlex
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
+from build_piano_runtime_helpers import source_patches
+from host import package_build
 
 ROOT = Path(__file__).resolve().parents[1]
 PATCH = ROOT / 'patches/gnome-settings-daemon/0001-power-optional-device-ambient-profile.patch'
 PREPARE = ROOT / 'linux/desktops/gnome/ambient-policy/packaging/prepare_package.py'
 POLICY = PREPARE.parent.parent
 SOURCE_VERSION = '48.1-1'
-PACKAGE_VERSION = SOURCE_VERSION + '+sunuefi1'
+PACKAGE_VERSION = SOURCE_VERSION + '+sunuefi2'
+PATCHES = [PATCH, *source_patches(ROOT / 'patches/gnome-settings-daemon/48.1/series.json')]
 RUNTIME = {'gnome-settings-daemon': 'arm64', 'gnome-settings-daemon-common': 'all'}
 
 
 def sha(path):
     with Path(path).open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+def patch_records():
+    return [{'path': path.relative_to(ROOT).as_posix(), 'sha256': sha(path)} for path in PATCHES]
 
 
 def run(args, **kwargs):
@@ -126,6 +133,8 @@ def validate_prepared(source):
     local = source / 'debian/patches/sunuefi-ambient-device-profile.patch'
     if sha(local) != sha(PATCH):
         raise ValueError('Prepared Debian patch differs from the current canonical patch')
+    if sha(source / 'debian/patches/sunuefi-keyboard-backlight-hotplug.patch') != sha(PATCHES[1]):
+        raise ValueError('Prepared keyboard hotplug patch differs')
     for name in ['gsd-ambient-profile.c', 'gsd-ambient-profile.h']:
         if (source / 'plugins/power' / name).read_bytes() != (POLICY / name).read_bytes():
             raise ValueError('Prepared ambient policy source differs: ' + name)
@@ -179,7 +188,7 @@ def collect(output, rootfs, source, origin, jobs):
             raise ValueError('Runtime package checksum differs from actual .changes')
     origin.update(proof)
     record = {'schema_version': 1, 'source': origin, 'packages_built': True,
-              'patches': [{'path': str(PATCH.relative_to(ROOT)), 'sha256': sha(PATCH)}],
+              'patches': patch_records(),
               'package_version': PACKAGE_VERSION, 'packages': packages,
               'recipe': 'original Debian debian/rules',
               'build_command': ['dpkg-buildpackage', '-b', '-us', '-uc'],
@@ -199,7 +208,7 @@ def reusable(output):
         return None
     record = json.loads(path.read_text())
     if (record.get('packages_built') is not True or record.get('package_version') != PACKAGE_VERSION or
-        record.get('patches') != [{'path': str(PATCH.relative_to(ROOT)), 'sha256': sha(PATCH)}] or
+        record.get('patches') != patch_records() or
         set(record.get('packages', {})) != set(RUNTIME)):
         return None
     for name, row in record['packages'].items():
@@ -221,8 +230,8 @@ def build(output, sysroot, jobs, source_cache=None, prepared_source=None,
     output, sysroot = output.resolve(), sysroot.resolve()
     if not output.is_relative_to(ROOT / 'build') or sysroot == Path('/') or not sysroot.is_relative_to(ROOT / 'build'):
         raise ValueError('Use project build directories for output and the completed input sysroot')
-    if not 1 <= jobs <= 8:
-        raise ValueError('Use 1 to 8 package build jobs')
+    if jobs < 1:
+        raise ValueError('Use at least one package build job')
     cached = reusable(output)
     if cached:
         return cached
@@ -253,7 +262,8 @@ def build(output, sysroot, jobs, source_cache=None, prepared_source=None,
             rootfs.parent.mkdir(parents=True, exist_ok=True)
             run(['cp', '-a', '--reflink=auto', sysroot, rootfs])
         cache = rootfs / 'build/sunuefi-gsd/cache'
-        source = rootfs / ('build/sunuefi-gsd/work-' + sha(PATCH)[:12] + '/source')
+        identity = hashlib.sha256(json.dumps(patch_records(), sort_keys=True).encode()).hexdigest()[:12]
+        source = rootfs / ('build/sunuefi-gsd/work-' + identity + '/source')
     with devices(rootfs), (output / 'build.log').open('a') as log:
         if capture(['chroot', rootfs, 'dpkg', '--print-architecture']) != 'arm64':
             raise ValueError('The isolated Debian builder must use arm64 packages')
@@ -272,7 +282,7 @@ def build(output, sysroot, jobs, source_cache=None, prepared_source=None,
             chroot(rootfs, ['apt-get', '-oAcquire::AllowInsecureRepositories=false',
                            '-oAPT::Get::AllowUnauthenticated=false', 'update'], stdout=log, stderr=subprocess.STDOUT)
             if install_dependencies:
-                chroot(rootfs, ['apt-get', 'install', '-y', '--no-install-recommends', 'dpkg-dev', 'build-essential'],
+                chroot(rootfs, ['apt-get', 'install', '-y', '--no-install-recommends', 'dpkg-dev', 'build-essential', 'ccache'],
                        stdout=log, stderr=subprocess.STDOUT)
                 chroot(rootfs, ['apt-get', 'build-dep', '-y', '--build-profiles=nocheck',
                                'gnome-settings-daemon=' + SOURCE_VERSION], stdout=log, stderr=subprocess.STDOUT)
@@ -288,7 +298,7 @@ def build(output, sysroot, jobs, source_cache=None, prepared_source=None,
             chroot(rootfs, ['dpkg-source', '-x', inside(rootfs, cache / origin['dsc']['file']), inside(rootfs, pristine)],
                    stdout=log, stderr=subprocess.STDOUT)
             mirror = rootfs / 'opt/sunuefi-gsd-source'
-            for path in [PATCH, PREPARE]:
+            for path in [*PATCHES, PATCHES[1].parent / 'series.json', PREPARE]:
                 destination = mirror / path.relative_to(ROOT)
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(path, destination)
@@ -308,7 +318,9 @@ def build(output, sysroot, jobs, source_cache=None, prepared_source=None,
         if not collect_only:
             env = ['env', 'DEB_BUILD_OPTIONS=nocheck parallel=' + str(jobs), 'DEB_BUILD_PROFILES=nocheck',
                    'sh', '-c', 'cd ' + shlex.quote(inside(rootfs, source)) + ' && dpkg-buildpackage -b -us -uc']
-            chroot(rootfs, env, stdout=log, stderr=subprocess.STDOUT)
+            with package_build.environment(rootfs) as settings:
+                env[1:1] = package_build.arguments(settings)
+                chroot(rootfs, env, stdout=log, stderr=subprocess.STDOUT)
             # dpkg-buildpackage runs --after-build and removes quilt's added
             # source files. Restore the patched view before collect validates
             # source provenance; the completed binary packages stay unchanged.
@@ -321,7 +333,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=ROOT / 'build/gsd')
     parser.add_argument('--sysroot', type=Path, required=True, help='Completed Debian trixie ARM64 base; cloned for a fresh build')
-    parser.add_argument('--jobs', type=int, default=2)
+    parser.add_argument('--jobs', type=int, default=package_build.default_jobs())
     parser.add_argument('--install-dependencies', action='store_true', default=True,
                         help='Install original Debian build dependencies (default)')
     parser.add_argument('--skip-install-dependencies', dest='install_dependencies', action='store_false',
@@ -329,7 +341,11 @@ if __name__ == '__main__':
     parser.add_argument('--source-cache', type=Path, help='Authenticated .dsc/archive cache of an existing isolated job')
     parser.add_argument('--prepared-source', type=Path, help='Existing patched Debian job source inside --sysroot')
     parser.add_argument('--collect-only', action='store_true', help='Seal a completed existing job; no download or compilation')
+    parser.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if not args.worker:
+        raise SystemExit(subprocess.run(['unshare', '--mount', '--propagation', 'private',
+                                        sys.executable, __file__, *sys.argv[1:], '--worker']).returncode)
     try:
         print(json.dumps(build(args.output, args.sysroot, args.jobs, args.source_cache,
                                args.prepared_source, args.collect_only, args.install_dependencies), indent=2))
