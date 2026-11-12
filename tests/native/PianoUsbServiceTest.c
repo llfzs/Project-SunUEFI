@@ -539,6 +539,10 @@ static VOID run_stale_completion(VOID){
   PIANO_DWC3_SERVICE_CONFIG C={.Context=(VOID *)0x55,.NowUs=now_us};
   assert(PianoUsbControllerServiceStart((VOID *)123,&C)==EFI_SUCCESS);
   UINTN Completed=completions;
+  for(UINTN I=0;I<3;++I){
+    service_event(0x101);
+    assert(completions==Completed&&mPending[0]&&mTrbs[0].Active&&mSetup.Active&&mPhase==0);
+  }
   service_event(0xC040); // Observed stale SETUP completion: new TRB still HWO.
   assert(completions==Completed && mPending[0] && mTrbs[0].Active && mSetup.Active && mPhase==0);
   service_enumerate();Completed=completions;
@@ -660,6 +664,12 @@ static VOID run_service(UINTN Test) {
   }
   if(Test==5)failed_halt=TRUE;if(Test==6)dma_free_status=EFI_WARN_STALE_DATA;if(Test==7)dma_complete_status=EFI_WARN_STALE_DATA;
   if(Test==20)corrupt_gctl_restore=TRUE;
+  if(Test==21){
+    halt_required_ends=0;
+    for(UINTN Ep=0;Ep<ARRAY_SIZE(mPending);++Ep)if(mPending[Ep]&&!mEnding[Ep])halt_required_ends|=1U<<Ep;
+    assert(halt_required_ends);
+    halt_requires_empty_ring=TRUE;regs[0xC40C/4]=8;regs[0xC200/4]|=BIT6|BIT8;
+  }
   if(Test==13)timer_cancel_warning=TRUE;if(Test==14)event_close_warning=TRUE;if(Test==15)clock_warning=TRUE;if(Test==16)domain_warning=TRUE;
   PIANO_USB_SERVICE_RETIRE_REPORT R;S=PianoUsbControllerServiceStop(EFI_SUCCESS,&R);
   if(Test==3 || Test==4 || Test==5 || Test==6 || Test==7 || Test==11 || Test==13 || Test==14 || Test==15 || Test==16 || Test==19 || Test==20) {
@@ -669,6 +679,7 @@ static VOID run_service(UINTN Test) {
     if(Test==16)assert(R.ClockReleaseMask==PIANO_USB_CLOCK_RELEASE_MASK && !held && !R.ClocksReleased);
   } else {
     assert(S==EFI_SUCCESS && R.Clean && !R.Retained && R.DeviceHalted && R.DmaFreed && R.DmaBuffersFreed==9 && R.DomainFreed && R.ClocksReleased && R.ClockReleaseMask==PIANO_USB_CLOCK_RELEASE_MASK);
+    if(Test==21)assert(!halt_required_ends&&!regs[0xC40C/4]);
     assert(closes==1 && !held && !domain && !mUsbShutdownLive && !mExperimentHasStorage && !mExperimentCheck && !mCombinedBusy && !mPersistent.Started);
     PIANO_SMMU_USB_RETIRE_EVIDENCE E;assert(PianoDwc3GetRetireEvidence(&E)==EFI_SUCCESS && E.DmaBuffersFreed==9);
     assert(mControllerRetireValid && !mRetireProofConsumed);PIANO_SMMU_RETIRED_USB_PROOF P;
@@ -785,12 +796,12 @@ int USB_SERVICE_TEST_MAIN(void) {
   for(UINTN I=0;I<15;++I){pid_t P=fork();assert(P>=0);if(!P){run_reset(I);_exit(0);}int S;assert(waitpid(P,&S,0)==P);if(!WIFEXITED(S)||WEXITSTATUS(S))return 1;}
   {pid_t P=fork();assert(P>=0);if(!P){run_idle_activity();_exit(0);}int S;assert(waitpid(P,&S,0)==P);if(!WIFEXITED(S)||WEXITSTATUS(S))return 1;}
   {pid_t P=fork();assert(P>=0);if(!P){run_stale_completion();_exit(0);}int S;assert(waitpid(P,&S,0)==P);if(!WIFEXITED(S)||WEXITSTATUS(S))return 1;}
-  for(UINTN I=0;I<21;++I){pid_t P=fork();assert(P>=0);if(P==0){run_service(I);_exit(0);}int Status;assert(waitpid(P,&Status,0)==P);if(!WIFEXITED(Status) || WEXITSTATUS(Status)){fprintf(stderr,"USB persistent service case %llu failed\n",(unsigned long long)I);return 1;}}
+  for(UINTN I=0;I<22;++I){pid_t P=fork();assert(P>=0);if(P==0){run_service(I);_exit(0);}int Status;assert(waitpid(P,&Status,0)==P);if(!WIFEXITED(Status) || WEXITSTATUS(Status)){fprintf(stderr,"USB persistent service case %llu failed\n",(unsigned long long)I);return 1;}}
   for(UINTN I=0;I<11;++I){pid_t P=fork();assert(P>=0);if(P==0){run_navigation(I);_exit(0);}int Status;assert(waitpid(P,&Status,0)==P);if(!WIFEXITED(Status) || WEXITSTATUS(Status)){fprintf(stderr,"USB product navigation case %llu failed\n",(unsigned long long)I);return 1;}}
   for(UINTN I=0;I<8;++I){pid_t P=fork();assert(P>=0);if(P==0){run_ramlog(I);_exit(0);}int Status;assert(waitpid(P,&Status,0)==P);if(!WIFEXITED(Status) || WEXITSTATUS(Status)){fprintf(stderr,"USB before-ramlog case %llu failed\n",(unsigned long long)I);return 1;}}
   for(STATUS_CASE I=0;I<StatusCaseCount;++I){pid_t P=fork();assert(P>=0);if(P==0){run_status(I);_exit(0);}int Status;assert(waitpid(P,&Status,0)==P);if(!WIFEXITED(Status) || WEXITSTATUS(Status)){fprintf(stderr,"USB status-report case %u failed\n",(unsigned)I);return 1;}}
   for(UINTN I=0;I<27;++I){pid_t P=fork();assert(P>=0);if(P==0){run_diagnostics(I);_exit(0);}int Status;assert(waitpid(P,&Status,0)==P);if(!WIFEXITED(Status) || WEXITSTATUS(Status)){fprintf(stderr,"USB diagnostics case %u failed\n",(unsigned)I);return 1;}}
-  puts("Actual Device+Controller persistent USB: 15 reset/startup-proof + 21 lifecycle + 11 navigation + 8 before-ramlog + 11 status-report + 27 failure-diagnostics cases PASS; in-flight response/END preservation, diagnostic enumeration/reset, saved log upload and fail-closed state checks; no device.");
+  puts("Actual Device+Controller persistent USB: 15 reset/startup-proof + 22 lifecycle + 11 navigation + 8 before-ramlog + 11 status-report + 27 failure-diagnostics cases PASS; in-flight response/END preservation, diagnostic enumeration/reset, saved log upload and fail-closed state checks; no device.");
 #else
   PIANO_USB_STARTUP_FAILURE_EVIDENCE Evidence;assert(PianoDwc3GetStartupFailureEvidence(&Evidence)==EFI_UNSUPPORTED && Evidence.Revision==1);
   (VOID)backend;PIANO_DWC3_SERVICE_STATUS S;PIANO_USB_SERVICE_RETIRE_REPORT R;PIANO_DWC3_SERVICE_CONFIG C={.Context=(VOID *)0x55,.NowUs=NULL};

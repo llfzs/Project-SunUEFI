@@ -130,7 +130,8 @@ def native_tools():
         path.chmod(0o755)
 
     flags = ['--target=aarch64-linux-gnu', '--sysroot=/', '--gcc-toolchain=/usr',
-             '-resource-dir=' + str(prefix), '-fuse-ld=bfd', '-fno-integrated-as',
+             '-resource-dir=' + str(prefix), '--start-no-unused-arguments',
+             '-fuse-ld=bfd', '--end-no-unused-arguments', '-fno-integrated-as',
              '-B' + str(prefix / 'bin'), '-Wno-unused-command-line-argument', '-gdwarf-4']
     wrapper('clang-driver', [str(prefix / 'tools/clang'), *flags])
     for name, cxx in [('clang', False), ('clang++', True)]:
@@ -157,16 +158,31 @@ def native_tools():
 
 
 @contextmanager
-def environment(rootfs):
+def environment(rootfs, user=None):
     """Only compiler/linker/make run as host ELF; target programs may use binfmt."""
     rootfs = Path(rootfs).resolve()
     cross = platform.machine() not in ('aarch64', 'arm64')
     if cross and rootfs == Path('/'):
         raise ValueError('ARM64 package builds on x86 need --sysroot; QEMU compilation is not used')
-    cache = Path(os.environ.get('CCACHE_DIR', ROOT / 'build/ccache')).resolve()
+    uid, gid = os.getuid(), os.getgid()
+    if user is not None:
+        accounts = [line.split(':') for line in (rootfs / 'etc/passwd').read_text().splitlines()]
+        account = next((row for row in accounts if row[0] == user), None)
+        if account is None:
+            raise ValueError('Package build account is missing: ' + user)
+        uid, gid = int(account[2]), int(account[3])
+    # Existing kernel caches contain root-owned subdirectories. A writable top
+    # directory does not make those usable by makepkg's unprivileged account.
+    cache = Path(os.environ.get('CCACHE_DIR', ROOT / 'build/ccache')).resolve() / 'packages' / str(uid)
     cache.mkdir(parents=True, exist_ok=True)
-    # makepkg runs as an unprivileged build user; no product files use this mode.
-    cache.chmod(0o1777)
+    os.chown(cache, uid, gid)
+    # CI restores cache entries as the runner account, including files inside
+    # UID-specific package caches. makepkg must be able to update those entries.
+    if user is not None:
+        for path in cache.rglob('*'):
+            info = path.lstat()
+            if info.st_uid != uid or info.st_gid != gid:
+                os.chown(path, uid, gid, follow_symlinks=False)
     mounts = []
 
     def bind(source, target):
@@ -183,7 +199,7 @@ def environment(rootfs):
         cache_path = str(cache)
         path = '/usr/lib/ccache:/usr/lib/ccache/bin:/usr/sbin:/usr/bin:/sbin:/bin'
         result = {'CCACHE_MAXSIZE': os.environ.get('CCACHE_MAXSIZE', '8G'),
-                  'CCACHE_UMASK': '000', 'CCACHE_COMPILERCHECK': 'content'}
+                  'CCACHE_COMPILERCHECK': 'content'}
         if rootfs != Path('/'):
             cache_path = '/var/cache/sunuefi-ccache'
             bind(cache, rootfs / cache_path.lstrip('/'))
